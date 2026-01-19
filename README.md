@@ -22,3 +22,17 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
 2. An trainable agent can hold a policy, NPCs have no policy.
 3. policy is the core neural network of a agent which help them to learn the ENV.
 4. policy can be any neural network like Transformers, LLM, CNN, RNN, LSTM, World Models, etc.
+
+## Development Setup
+1. Install Simverse in editable mode with the dev extras:
+   ```bash
+   pip install -e .[dev]
+   ```
+2. Install the Git hooks so Ruff runs automatically:
+   ```bash
+   pre-commit install
+   ```
+3. Run the hooks on demand (useful for CI or after large refactors):
+   ```bash
+   pre-commit run --all-files
+   ```
