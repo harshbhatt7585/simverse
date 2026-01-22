@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from traceback import print_tb
 
 import numpy as np
 
@@ -39,6 +40,7 @@ class FarmtilaRender:
         self.clock = pygame.time.Clock()
         self.screen = self._init_display()
         self.grid_surface = self._build_grid_surface()
+        self.agent_surface = self._build_agent_surface()
         self.font = pygame.font.SysFont("Arial", max(12, self.cell_size // 2))
         button_width = int(self.cell_size * 4)
         button_height = int(self.cell_size * 0.9)
@@ -71,15 +73,41 @@ class FarmtilaRender:
         surface = pygame.surfarray.make_surface(np.swapaxes(surface_array, 0, 1))
         return surface.convert()
 
+    def _build_agent_surface(self) -> pygame.Surface:
+        """Create a single-color agent sprite inspired by the provided SVG."""
+        base = 400
+        color = (74, 144, 226)
+        surface = pygame.Surface((base, base), pygame.SRCALPHA)
+
+        def ellipse(cx, cy, rx, ry):
+            rect = pygame.Rect(cx - rx, cy - ry, rx * 2, ry * 2)
+            pygame.draw.ellipse(surface, color, rect)
+
+        def circle(cx, cy, radius):
+            ellipse(cx, cy, radius, radius)
+
+        # Major body parts kept but flattened to a single color
+        ellipse(200, 240, 70, 80)   # torso
+        ellipse(175, 310, 25, 30)   # left leg
+        ellipse(225, 310, 25, 30)   # right leg
+        ellipse(145, 230, 22, 45)   # left arm
+        ellipse(255, 230, 22, 45)   # right arm
+        circle(200, 160, 60)        # head
+        circle(160, 130, 25)        # left ear
+        circle(240, 130, 25)        # right ear
+
+        scaled_size = self.cell_size
+        return pygame.transform.smoothscale(surface, (scaled_size, scaled_size))
+
     def draw(self, env: FarmtilaEnv):
+        self.env = env
         self.screen.blit(self.grid_surface, (0, 0))
 
-        # draw each agent
-        half = self.cell_size // 2
+        # draw each agent using the simplified sprite
         for agent in env.agents:
-            cx = agent.position[0] * self.cell_size + half
-            cy = agent.position[1] * self.cell_size + half
-            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), max(4, half))
+            x = agent.position[0] * self.cell_size
+            y = agent.position[1] * self.cell_size
+            self.screen.blit(self.agent_surface, (x, y))
 
         self._draw_button()
         
@@ -107,10 +135,6 @@ class FarmtilaRender:
         pygame.draw.rect(self.screen, (30, 144, 255), self.button_rect, border_radius=6)
         text_rect = self.button_text_surface.get_rect(center=self.button_rect.center)
         self.screen.blit(self.button_text_surface, text_rect)
-
-    def on_button_click(self):
-        """Placeholder handler for button interactions."""
-        pass
 
     
 
