@@ -36,6 +36,7 @@ class FarmtilaRender:
         self.fps = fps
         self.clock = pygame.time.Clock()
         self.screen = self._init_display()
+        self.grid_surface = self._build_grid_surface()
         pygame.display.set_caption("Farmtila")
 
     def _init_display(self) -> pygame.Surface:
@@ -50,8 +51,25 @@ class FarmtilaRender:
             pygame.display.init()
             return pygame.display.set_mode(size)
 
+    def _build_grid_surface(self) -> pygame.Surface:
+        """Pre-render the grid so it can be blitted each frame."""
+        w = self.width * self.cell_size
+        h = self.height * self.cell_size
+        surface = pygame.Surface((w, h))
+        surface.fill((255, 255, 255))
+        
+        grid_color = (220, 220, 220)
+        # vertical lines
+        for x in range(0, w + 1, self.cell_size):
+            pygame.draw.line(surface, grid_color, (x, 0), (x, h - 1))
+        # horizontal lines
+        for y in range(0, h + 1, self.cell_size):
+            pygame.draw.line(surface, grid_color, (0, y), (w - 1, y))
+        
+        return surface.convert()
+
     def draw(self, env: FarmtilaEnv):
-        self.screen.fill((255, 255, 255))
+        self.screen.blit(self.grid_surface, (0, 0))
         
         # draw each agent
         half = self.cell_size // 2
@@ -84,7 +102,7 @@ class FarmtilaRender:
 
 if __name__ == "__main__":
     render = FarmtilaRender(width=50, height=50)
-    env = FarmtilaEnv(FarmtilaConfig(width=50, height=50))
+    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20))
     env.reset()
 
     max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
