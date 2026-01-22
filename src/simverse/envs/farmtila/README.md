@@ -6,3 +6,13 @@ In the start of the simulation, seeds will be distributed randomly all over the 
 so they can harvet the land. One seed can harvest one box of the grid. Seeds will again put randomly over than land after every 
 (X) number of total agents steps. 
 
+
+## Action Space
+
+Discrete (6)
+0 - Move up
+1 - Move down
+2 - Move left
+3 - Move right
+4 - pickup the seed
+5 - harvest the land
