@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
+
 if __name__ == "__main__" and __package__ is None:
     _src = Path(__file__).resolve().parents[3]  # src/
     sys.path.insert(0, str(_src))
@@ -57,20 +59,16 @@ class FarmtilaRender:
             return pygame.display.set_mode(size)
 
     def _build_grid_surface(self) -> pygame.Surface:
-        """Pre-render the grid so it can be blitted each frame."""
+        """Pre-render the grid using numpy so it can be blitted each frame."""
         w = self.width * self.cell_size
         h = self.height * self.cell_size
-        surface = pygame.Surface((w, h))
-        surface.fill((255, 255, 255))
-        
-        grid_color = (220, 220, 220)
-        # vertical lines
-        for x in range(0, w + 1, self.cell_size):
-            pygame.draw.line(surface, grid_color, (x, 0), (x, h - 1))
-        # horizontal lines
-        for y in range(0, h + 1, self.cell_size):
-            pygame.draw.line(surface, grid_color, (0, y), (w - 1, y))
-        
+        grid_color = np.array((220, 220, 220), dtype=np.uint8)
+        surface_array = np.full((h, w, 3), 255, dtype=np.uint8)
+        surface_array[::self.cell_size, :, :] = grid_color
+        surface_array[:, ::self.cell_size, :] = grid_color
+        surface_array[-1, :, :] = grid_color
+        surface_array[:, -1, :] = grid_color
+        surface = pygame.surfarray.make_surface(np.swapaxes(surface_array, 0, 1))
         return surface.convert()
 
     def draw(self, env: FarmtilaEnv):
