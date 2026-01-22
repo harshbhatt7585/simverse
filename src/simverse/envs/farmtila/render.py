@@ -4,7 +4,6 @@ import os
 import sys
 from pathlib import Path
 
-# Allow running as script: python render.py
 if __name__ == "__main__" and __package__ is None:
     _src = Path(__file__).resolve().parents[3]  # src/
     sys.path.insert(0, str(_src))
@@ -55,8 +54,11 @@ class FarmtilaRender:
         self.screen.fill((255, 255, 255))
         
         # draw each agent
+        half = self.cell_size // 2
         for agent in env.agents:
-            pygame.draw.circle(self.screen, (0, 0, 0), (agent.position[0] * self.cell_size, agent.position[1] * self.cell_size), 10)
+            cx = agent.position[0] * self.cell_size + half
+            cy = agent.position[1] * self.cell_size + half
+            pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), max(4, half))
         
         pygame.display.flip()
         self.clock.tick(self.fps)
@@ -83,13 +85,19 @@ class FarmtilaRender:
 if __name__ == "__main__":
     render = FarmtilaRender(width=50, height=50)
     env = FarmtilaEnv(FarmtilaConfig(width=50, height=50))
-    
+    env.reset()
+
+    max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
+    frames = 0
+
     try:
         while True:
             render.handle_events()
             render.draw(env)
+            frames += 1
+            if max_frames and frames >= max_frames:
+                break
     except SystemExit:
         pass
     finally:
         render.close()
-
