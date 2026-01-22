@@ -37,6 +37,11 @@ class FarmtilaRender:
         self.clock = pygame.time.Clock()
         self.screen = self._init_display()
         self.grid_surface = self._build_grid_surface()
+        self.font = pygame.font.SysFont("Arial", max(12, self.cell_size // 2))
+        button_width = int(self.cell_size * 4)
+        button_height = int(self.cell_size * 0.9)
+        self.button_rect = pygame.Rect(10, 10, button_width, button_height)
+        self.button_text_surface = self.font.render("Action", True, (255, 255, 255))
         pygame.display.set_caption("Farmtila")
 
     def _init_display(self) -> pygame.Surface:
@@ -70,13 +75,15 @@ class FarmtilaRender:
 
     def draw(self, env: FarmtilaEnv):
         self.screen.blit(self.grid_surface, (0, 0))
-        
+
         # draw each agent
         half = self.cell_size // 2
         for agent in env.agents:
             cx = agent.position[0] * self.cell_size + half
             cy = agent.position[1] * self.cell_size + half
             pygame.draw.circle(self.screen, (0, 0, 0), (cx, cy), max(4, half))
+
+        self._draw_button()
         
         pygame.display.flip()
         self.clock.tick(self.fps)
@@ -90,10 +97,22 @@ class FarmtilaRender:
                 if event.key == pygame.K_ESCAPE:
                     raise SystemExit
                 return KEY_TO_ACTION.get(event.key)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.button_rect.collidepoint(event.pos):
+                    self.on_button_click()
         return None
     
     def close(self):
         pygame.quit()
+
+    def _draw_button(self):
+        pygame.draw.rect(self.screen, (30, 144, 255), self.button_rect, border_radius=6)
+        text_rect = self.button_text_surface.get_rect(center=self.button_rect.center)
+        self.screen.blit(self.button_text_surface, text_rect)
+
+    def on_button_click(self):
+        """Placeholder handler for button interactions."""
+        pass
 
     
 
