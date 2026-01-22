@@ -16,3 +16,22 @@ Discrete (6)
 3 - Move right
 4 - pickup the seed
 5 - harvest the land
+
+
+## Grid World
+Size -- W x H
+
+## World layers
+
+### Seed Grid
+1. If a seed is present in a box of a grid, the seen seed_grid value is == 1
+so, seed_grid[x, y] ∈ {0, 1}
+
+### Land Ownership
+2. owner_grid[x, y] ∈ {-1, 0..N-1}
+-1 = unharvested
+i = harvest by agent i 
+
+# Agent Position
+3. pos[i] = (x, y)
+
