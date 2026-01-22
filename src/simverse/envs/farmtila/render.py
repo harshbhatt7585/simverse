@@ -8,3 +8,11 @@ KEY_TO_ACTION = {
     pygame.K_z: 4,
     pygame.K_x: 5,
 }
+
+class FarmtilaRender:
+    def __init__(self, cell_size: int = 24, fps: int = 30):
+        self.cell_size = cell_size
+        self.fps = fps
+
+    def render(self):
+        pass
