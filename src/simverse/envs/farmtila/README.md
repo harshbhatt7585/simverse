@@ -42,6 +42,7 @@ Obs:
 1. given the state, owner_grid value
 2. given the state, seed_grid value
 3. agent(self) position
-4. own inventory (scalar)
+4. own inventory (scalar) [Number of seeds aquired]
+
 
 
