@@ -1,7 +1,7 @@
 from simverse.envs.farmtila.config import FarmtilaConfig
 import numpy as np
 from simverse.agent.sim_agent import SimAgent
-
+from typing import List
 
 class FarmtilaEnv():
     def __init__(self, config: FarmtilaConfig):
@@ -12,7 +12,7 @@ class FarmtilaEnv():
 
         # Agent class have their own position
 
-        self.agents: SimAgent = []
+        self.agents: List[SimAgent] = []
 
         self.steps = 0
     
