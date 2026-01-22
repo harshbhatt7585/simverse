@@ -1,4 +1,16 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# Allow running as script: python render.py
+if __name__ == "__main__" and __package__ is None:
+    _src = Path(__file__).resolve().parents[3]  # src/
+    sys.path.insert(0, str(_src))
+
 import pygame
+
 from simverse.envs.farmtila.env import FarmtilaEnv
 from simverse.envs.farmtila.config import FarmtilaConfig
 
@@ -24,8 +36,20 @@ class FarmtilaRender:
         self.cell_size = cell_size
         self.fps = fps
         self.clock = pygame.time.Clock()
-        self.screen = pygame.display.set_mode((self.width * self.cell_size, self.height * self.cell_size))
+        self.screen = self._init_display()
         pygame.display.set_caption("Farmtila")
+
+    def _init_display(self) -> pygame.Surface:
+        size = (self.width * self.cell_size, self.height * self.cell_size)
+        try:
+            return pygame.display.set_mode(size)
+        except pygame.error:
+            if os.environ.get("SDL_VIDEODRIVER") == "dummy":
+                raise
+            os.environ["SDL_VIDEODRIVER"] = "dummy"
+            pygame.display.quit()
+            pygame.display.init()
+            return pygame.display.set_mode(size)
 
     def draw(self, env: FarmtilaEnv):
         self.screen.fill((255, 255, 255))
@@ -34,6 +58,19 @@ class FarmtilaRender:
         for agent in env.agents:
             pygame.draw.circle(self.screen, (0, 0, 0), (agent.position[0] * self.cell_size, agent.position[1] * self.cell_size), 10)
         
+        pygame.display.flip()
+        self.clock.tick(self.fps)
+    
+    def handle_events(self) -> int | None:
+        """Handle pygame events. Returns action if key pressed, None otherwise. Raises SystemExit on quit."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                raise SystemExit
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    raise SystemExit
+                return KEY_TO_ACTION.get(event.key)
+        return None
     
     def close(self):
         pygame.quit()
@@ -46,7 +83,13 @@ class FarmtilaRender:
 if __name__ == "__main__":
     render = FarmtilaRender(width=50, height=50)
     env = FarmtilaEnv(FarmtilaConfig(width=50, height=50))
-    render.draw(env)
-    render.close()
+    
+    try:
+        while True:
+            render.handle_events()
+            render.draw(env)
+    except SystemExit:
+        pass
+    finally:
+        render.close()
 
-        
