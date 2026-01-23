@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Iterable, List
+from typing import Tuple
 
 import numpy as np
+
 
 from .config import FarmtilaConfig
 
@@ -35,6 +37,12 @@ class FarmtilaEnv():
         self.agents = self._spawn_agents()
         self.steps = 0
         return self._get_observation()
+
+
+    def get_grid_seed_random(self) -> List[Tuple[int, int]]:  
+        if steps % self.config.spawn_seed_every == 0:
+            return self.rng.choice(self.config.width * self.config.height, self.config.seeds_per_spawn, replace=False)
+        return []
     
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
         """Advance the simulation by applying actions to agents."""
