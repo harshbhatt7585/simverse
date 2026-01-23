@@ -109,6 +109,8 @@ class FarmtilaRender:
             env.step_random()
         self.screen.blit(self.grid_surface, (0, 0))
 
+        self._draw_seeds(env)
+
         # draw each agent using the simplified sprite with index overlay
         for idx, agent in enumerate(env.agents):
             x = agent.position[0] * self.cell_size
@@ -157,6 +159,18 @@ class FarmtilaRender:
         label_surface = self._get_agent_label_surface(idx)
         rect = label_surface.get_rect(center=(x + self.cell_size // 2, y + label_surface.get_height() // 2 + 2))
         self.screen.blit(label_surface, rect)
+
+    def _draw_seeds(self, env: FarmtilaEnv):
+        seeds = np.argwhere(env.seed_grid > 0)
+        if seeds.size == 0:
+            return
+        radius = max(3, self.cell_size // 6)
+        color = (46, 204, 113)
+        offset = self.cell_size // 2
+        for x, y in seeds:
+            cx = int(x) * self.cell_size + offset
+            cy = int(y) * self.cell_size + offset
+            pygame.draw.circle(self.screen, color, (cx, cy), radius)
 
     def _get_agent_label_surface(self, idx: int) -> pygame.Surface:
         if idx not in self.agent_label_cache:

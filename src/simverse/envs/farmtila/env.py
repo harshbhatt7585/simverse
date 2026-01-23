@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 from typing import Tuple
 
 import numpy as np
@@ -58,6 +58,7 @@ class FarmtilaEnv():
             new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
             agent.position = (new_x, new_y)
         self.steps += 1
+        self._spawn_seeds_if_due()
         return self._get_observation()
 
     def step_random(self):
@@ -91,6 +92,28 @@ class FarmtilaEnv():
             "owner_grid": self.owner_grid.copy(),
             "agents": [agent.position for agent in self.agents],
         }
+
+    def get_grid_seed_random(self) -> List[Tuple[int, int]]:
+        if self.config.spawn_seed_every <= 0:
+            return []
+        if self.steps % self.config.spawn_seed_every != 0:
+            return []
+        total_cells = self.config.width * self.config.height
+        if total_cells == 0 or self.config.seeds_per_spawn <= 0:
+            return []
+        count = min(self.config.seeds_per_spawn, total_cells)
+        flat_indices = self.rng.choice(total_cells, size=count, replace=False)
+        positions = []
+        for idx in np.atleast_1d(flat_indices):
+            x = int(idx) // self.config.height
+            y = int(idx) % self.config.height
+            positions.append((x, y))
+        return positions
+
+    def _spawn_seeds_if_due(self):
+        for x, y in self.get_grid_seed_random():
+            self.seed_grid[x, y] = 1
+            self.owner_grid[x, y] = -1
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:
