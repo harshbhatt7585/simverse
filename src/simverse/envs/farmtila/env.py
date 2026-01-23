@@ -28,7 +28,7 @@ class FarmtilaEnv():
         self.agents: List[FarmtilaAgent] = []
 
         self.rng = np.random.default_rng()
-
+        
         self.steps = 0
     
     def reset(self):
@@ -36,6 +36,7 @@ class FarmtilaEnv():
         self.owner_grid.fill(-1)
         self.agents = self._spawn_agents()
         self.steps = 0
+        self._spawn_seeds_if_due(force=True)
         return self._get_observation()
 
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
@@ -87,10 +88,10 @@ class FarmtilaEnv():
             "agents": [agent.position for agent in self.agents],
         }
 
-    def get_grid_seed_random(self) -> List[Tuple[int, int]]:
-        if self.config.spawn_seed_every <= 0:
+    def get_grid_seed_random(self, *, force: bool = False) -> List[Tuple[int, int]]:
+        if self.config.spawn_seed_every <= 0 and not force:
             return []
-        if self.steps % self.config.spawn_seed_every != 0:
+        if not force and self.steps % self.config.spawn_seed_every != 0:
             return []
         total_cells = self.config.width * self.config.height
         if total_cells == 0 or self.config.seeds_per_spawn <= 0:
@@ -104,8 +105,8 @@ class FarmtilaEnv():
             positions.append((x, y))
         return positions
 
-    def _spawn_seeds_if_due(self):
-        for x, y in self.get_grid_seed_random():
+    def _spawn_seeds_if_due(self, *, force: bool = False):
+        for x, y in self.get_grid_seed_random(force=force):
             self.seed_grid[x, y] = 1
             self.owner_grid[x, y] = -1
 
