@@ -40,7 +40,7 @@ class FarmtilaEnv():
 
 
     def get_grid_seed_random(self) -> List[Tuple[int, int]]:  
-        if steps % self.config.spawn_seed_every == 0:
+        if self.steps % self.config.spawn_seed_every == 0:
             return self.rng.choice(self.config.width * self.config.height, self.config.seeds_per_spawn, replace=False)
         return []
     
