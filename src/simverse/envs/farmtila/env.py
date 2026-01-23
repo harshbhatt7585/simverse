@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
-from typing import Tuple
 
 import numpy as np
 
@@ -30,41 +29,34 @@ class FarmtilaEnv():
         self.rng = np.random.default_rng()
         
         self.steps = 0
+        self.last_pickups: List[Tuple[int, int, int]] = []
     
     def reset(self):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
         self.agents = self._spawn_agents()
         self.steps = 0
+        self.last_pickups = []
         self._spawn_seeds_if_due(force=True)
         return self._get_observation()
 
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
         """Advance the simulation by applying actions to agents."""
         action_map = self._normalize_actions(actions)
+        self.last_pickups = []
         for agent in self.agents:
             action = action_map.get(agent.agent_id)
-            print(f"Agent {agent.agent_id} action: {action}")
-            if action is None:
-                continue
-            dx, dy = self._action_to_delta(action)
-            if dx == 0 and dy == 0:
-                continue
-            new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
-            new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
-            agent.position = (new_x, new_y)
+            if action is not None:
+                dx, dy = self._action_to_delta(action)
+                new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
+                new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
+                agent.position = (new_x, new_y)
+            self._collect_seed_if_present(agent)
         self.steps += 1
         self._spawn_seeds_if_due()
         return self._get_observation()
 
     
-    def pickup_seed(self, agent_id: int) -> None:
-        agent = self.agents[agent_id]
-        if self.seed_grid[agent.position[0], agent.position[1]] == 0:
-            return None
-        self.seed_grid[agent.position[0], agent.position[1]] = 0
-        agent.inventory += 1
-
     def step_random(self):
         """Apply a random move to every agent."""
         actions = {
@@ -118,6 +110,14 @@ class FarmtilaEnv():
         for x, y in self.get_grid_seed_random(force=force):
             self.seed_grid[x, y] = 1
             self.owner_grid[x, y] = -1
+
+    def _collect_seed_if_present(self, agent: FarmtilaAgent):
+        x, y = agent.position
+        if self.seed_grid[x, y] > 0:
+            self.seed_grid[x, y] = 0
+            self.owner_grid[x, y] = agent.agent_id
+            agent.inventory += 1
+            self.last_pickups.append((agent.agent_id, x, y))
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:

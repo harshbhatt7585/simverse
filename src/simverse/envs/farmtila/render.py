@@ -106,7 +106,8 @@ class FarmtilaRender:
     def draw(self, env: FarmtilaEnv):
         self.env = env
         if self.running_random:
-            env.step_random()
+            actions = self._seed_harvest_actions(env)
+            env.step(actions)
         self.screen.blit(self.grid_surface, (0, 0))
 
         self._draw_seeds(env)
@@ -179,6 +180,36 @@ class FarmtilaRender:
             surface.set_alpha(150)
             self.agent_label_cache[idx] = surface
         return self.agent_label_cache[idx]
+
+    def _seed_harvest_actions(self, env: FarmtilaEnv) -> dict[int, int]:
+        seeds = np.argwhere(env.seed_grid > 0)
+        if seeds.size == 0:
+            return {}
+        actions: dict[int, int] = {}
+        for agent in env.agents:
+            target = self._nearest_seed(agent.position, seeds)
+            if target is None:
+                continue
+            dx = target[0] - agent.position[0]
+            dy = target[1] - agent.position[1]
+            if abs(dx) >= abs(dy) and dx != 0:
+                actions[agent.agent_id] = 3 if dx > 0 else 2
+            elif dy != 0:
+                actions[agent.agent_id] = 1 if dy > 0 else 0
+        return actions
+
+    def _nearest_seed(self, position: tuple[int, int], seeds: np.ndarray) -> tuple[int, int] | None:
+        if seeds.size == 0:
+            return None
+        px, py = position
+        best_seed: tuple[int, int] | None = None
+        best_dist = None
+        for sx, sy in seeds:
+            dist = abs(int(sx) - px) + abs(int(sy) - py)
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+                best_seed = (int(sx), int(sy))
+        return best_seed
 
     
 
