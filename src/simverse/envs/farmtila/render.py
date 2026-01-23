@@ -202,23 +202,17 @@ class FarmtilaRender:
         return self.agent_label_cache[idx]
 
     def _seed_harvest_actions(self, env: FarmtilaEnv) -> dict[int, int]:
-        seeds = np.argwhere(env.seed_grid > 0)
-        if seeds.size == 0:
-            seeds = np.empty((0, 2), dtype=int)
         actions: dict[int, int] = {}
         for agent in env.agents:
             if agent.inventory > 0 and env.farm_grid[agent.position[0], agent.position[1]] == 0:
                 actions[agent.agent_id] = env.HARVEST_ACTION
                 continue
-            target = self._nearest_seed(agent.position, seeds)
-            if target is None:
-                continue
-            dx = target[0] - agent.position[0]
-            dy = target[1] - agent.position[1]
-            if abs(dx) >= abs(dy) and dx != 0:
-                actions[agent.agent_id] = 3 if dx > 0 else 2
-            elif dy != 0:
-                actions[agent.agent_id] = 1 if dy > 0 else 0
+            rng = getattr(env, "rng", None)
+            if rng is None:
+                action = int(np.random.randint(0, 4))
+            else:
+                action = int(rng.integers(0, 4))
+            actions[agent.agent_id] = action
         return actions
 
     def _nearest_seed(self, position: tuple[int, int], seeds: np.ndarray) -> tuple[int, int] | None:
@@ -255,14 +249,14 @@ if __name__ == "__main__":
     env = FarmtilaEnv(FarmtilaConfig(width=30, height=20, num_agents=2))
     env.reset()
 
+    render.run_random_simulation()
+
     max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
     frames = 0
 
     try:
         while True:
-            action = render.handle_events()
-            if action is not None:
-                env.step({render.controlled_agent_id: action})
+            render.handle_events()
             render.draw(env)
             frames += 1
             if max_frames and frames >= max_frames:
