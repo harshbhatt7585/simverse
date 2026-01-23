@@ -58,10 +58,10 @@ class FarmtilaEnv():
         return self._get_observation()
 
     
-    def can_agent_pickup_seed(self, agent_id: int) -> bool:
+    def pickup_seed(self, agent_id: int) -> None:
         agent = self.agents[agent_id]
         if self.seed_grid[agent.position[0], agent.position[1]] == 0:
-            return
+            return None
         self.seed_grid[agent.position[0], agent.position[1]] = 0
         agent.inventory += 1
 
