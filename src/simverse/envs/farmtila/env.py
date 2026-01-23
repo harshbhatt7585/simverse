@@ -44,6 +44,7 @@ class FarmtilaEnv():
         action_map = self._normalize_actions(actions)
         for agent in self.agents:
             action = action_map.get(agent.agent_id)
+            print(f"Agent {agent.agent_id} action: {action}")
             if action is None:
                 continue
             dx, dy = self._action_to_delta(action)
@@ -55,6 +56,14 @@ class FarmtilaEnv():
         self.steps += 1
         self._spawn_seeds_if_due()
         return self._get_observation()
+
+    
+    def can_agent_pickup_seed(self, agent_id: int) -> bool:
+        agent = self.agents[agent_id]
+        if self.seed_grid[agent.position[0], agent.position[1]] == 0:
+            return
+        self.seed_grid[agent.position[0], agent.position[1]] = 0
+        agent.inventory += 1
 
     def step_random(self):
         """Apply a random move to every agent."""

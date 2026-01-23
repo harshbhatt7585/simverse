@@ -187,7 +187,7 @@ class FarmtilaRender:
 
 if __name__ == "__main__":
     render = FarmtilaRender(width=50, height=50)
-    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20))
+    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20, num_agents=1))
     env.reset()
 
     max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
