@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from traceback import print_tb
 
 import numpy as np
 
@@ -42,10 +41,15 @@ class FarmtilaRender:
         self.grid_surface = self._build_grid_surface()
         self.agent_surface = self._build_agent_surface()
         self.font = pygame.font.SysFont("Arial", max(12, self.cell_size // 2))
-        button_width = int(self.cell_size * 4)
-        button_height = int(self.cell_size * 0.9)
+        self.agent_label_font = pygame.font.SysFont("Arial", max(10, self.cell_size // 3))
+        self.agent_label_cache: dict[int, pygame.Surface] = {}
+        button_width = int(self.cell_size * 5)
+        button_height = int(self.cell_size)
         self.button_rect = pygame.Rect(10, 10, button_width, button_height)
-        self.button_text_surface = self.font.render("Action", True, (255, 255, 255))
+        self.button_text_surface = self._render_button_text("Run Random Simulation")
+        self.running_random = False
+        self.env: FarmtilaEnv | None = None
+        self.controlled_agent_id = 0
         pygame.display.set_caption("Farmtila")
 
     def _init_display(self) -> pygame.Surface:
@@ -101,13 +105,16 @@ class FarmtilaRender:
 
     def draw(self, env: FarmtilaEnv):
         self.env = env
+        if self.running_random:
+            env.step_random()
         self.screen.blit(self.grid_surface, (0, 0))
 
-        # draw each agent using the simplified sprite
-        for agent in env.agents:
+        # draw each agent using the simplified sprite with index overlay
+        for idx, agent in enumerate(env.agents):
             x = agent.position[0] * self.cell_size
             y = agent.position[1] * self.cell_size
             self.screen.blit(self.agent_surface, (x, y))
+            self._draw_agent_label(idx, x, y)
 
         self._draw_button()
         
@@ -122,19 +129,42 @@ class FarmtilaRender:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     raise SystemExit
+                if self.running_random:
+                    self.run_random_simulation()  # toggles off
                 return KEY_TO_ACTION.get(event.key)
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.button_rect.collidepoint(event.pos):
-                    self.on_button_click()
+                    self.run_random_simulation()
         return None
     
     def close(self):
         pygame.quit()
 
+    def run_random_simulation(self):
+        self.running_random = not self.running_random
+        label = "Stop Random Simulation" if self.running_random else "Run Random Simulation"
+        self.button_text_surface = self._render_button_text(label)
+
     def _draw_button(self):
         pygame.draw.rect(self.screen, (30, 144, 255), self.button_rect, border_radius=6)
         text_rect = self.button_text_surface.get_rect(center=self.button_rect.center)
         self.screen.blit(self.button_text_surface, text_rect)
+
+    def _render_button_text(self, label: str) -> pygame.Surface:
+        return self.font.render(label, True, (255, 255, 255))
+
+    def _draw_agent_label(self, idx: int, x: int, y: int):
+        label_surface = self._get_agent_label_surface(idx)
+        rect = label_surface.get_rect(center=(x + self.cell_size // 2, y + label_surface.get_height() // 2 + 2))
+        self.screen.blit(label_surface, rect)
+
+    def _get_agent_label_surface(self, idx: int) -> pygame.Surface:
+        if idx not in self.agent_label_cache:
+            surface = self.agent_label_font.render(str(idx), True, (0, 0, 0))
+            surface = surface.convert_alpha()
+            surface.set_alpha(150)
+            self.agent_label_cache[idx] = surface
+        return self.agent_label_cache[idx]
 
     
 
@@ -151,7 +181,9 @@ if __name__ == "__main__":
 
     try:
         while True:
-            render.handle_events()
+            action = render.handle_events()
+            if action is not None:
+                env.step({render.controlled_agent_id: action})
             render.draw(env)
             frames += 1
             if max_frames and frames >= max_frames:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, Iterable, List
 
 import numpy as np
 
@@ -25,6 +25,8 @@ class FarmtilaEnv():
 
         self.agents: List[FarmtilaAgent] = []
 
+        self.rng = np.random.default_rng()
+
         self.steps = 0
     
     def reset(self):
@@ -34,8 +36,29 @@ class FarmtilaEnv():
         self.steps = 0
         return self._get_observation()
     
-    def step(self):
-        pass
+    def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
+        """Advance the simulation by applying actions to agents."""
+        action_map = self._normalize_actions(actions)
+        for agent in self.agents:
+            action = action_map.get(agent.agent_id)
+            if action is None:
+                continue
+            dx, dy = self._action_to_delta(action)
+            if dx == 0 and dy == 0:
+                continue
+            new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
+            new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
+            agent.position = (new_x, new_y)
+        self.steps += 1
+        return self._get_observation()
+
+    def step_random(self):
+        """Apply a random move to every agent."""
+        actions = {
+            agent.agent_id: int(self.rng.integers(0, 4))  # movement actions only
+            for agent in self.agents
+        }
+        return self.step(actions)
 
     def render(self):
         pass
@@ -60,3 +83,21 @@ class FarmtilaEnv():
             "owner_grid": self.owner_grid.copy(),
             "agents": [agent.position for agent in self.agents],
         }
+
+    def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
+        if actions is None:
+            return {}
+        if isinstance(actions, dict):
+            return actions
+        if isinstance(actions, int):
+            return {0: actions}
+        # treat iterable as ordered by agent id
+        return {agent_id: action for agent_id, action in enumerate(actions)}
+
+    def _action_to_delta(self, action: int) -> tuple[int, int]:
+        return {
+            0: (0, -1),  # up
+            1: (0, 1),   # down
+            2: (-1, 0),  # left
+            3: (1, 0),   # right
+        }.get(action, (0, 0))
