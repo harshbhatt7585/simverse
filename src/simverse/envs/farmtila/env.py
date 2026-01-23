@@ -38,12 +38,6 @@ class FarmtilaEnv():
         self.steps = 0
         return self._get_observation()
 
-
-    def get_grid_seed_random(self) -> List[Tuple[int, int]]:  
-        if self.steps % self.config.spawn_seed_every == 0:
-            return self.rng.choice(self.config.width * self.config.height, self.config.seeds_per_spawn, replace=False)
-        return []
-    
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
         """Advance the simulation by applying actions to agents."""
         action_map = self._normalize_actions(actions)
