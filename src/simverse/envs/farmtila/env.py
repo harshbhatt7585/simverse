@@ -5,7 +5,6 @@ from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 
-
 from .config import FarmtilaConfig
 
 
@@ -16,11 +15,14 @@ class FarmtilaAgent:
     inventory: int = 0
 
 class FarmtilaEnv():
+    HARVEST_ACTION = 4
+
     def __init__(self, config: FarmtilaConfig):
         self.config = config
 
         self.seed_grid = np.zeros((config.width, config.height))
         self.owner_grid = np.full((config.width, config.height), -1)
+        self.farm_grid = np.zeros((config.width, config.height), dtype=np.uint8)
 
         # Agent class have their own position
 
@@ -34,6 +36,7 @@ class FarmtilaEnv():
     def reset(self):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
+        self.farm_grid.fill(0)
         self.agents = self._spawn_agents()
         self.steps = 0
         self.last_pickups = []
@@ -51,6 +54,8 @@ class FarmtilaEnv():
                 new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
                 agent.position = (new_x, new_y)
+                if action == self.HARVEST_ACTION:
+                    self._plant_farm(agent)
             self._collect_seed_if_present(agent)
         self.steps += 1
         self._spawn_seeds_if_due()
@@ -86,6 +91,7 @@ class FarmtilaEnv():
         return {
             "seed_grid": self.seed_grid.copy(),
             "owner_grid": self.owner_grid.copy(),
+            "farm_grid": self.farm_grid.copy(),
             "agents": [agent.position for agent in self.agents],
         }
 
@@ -115,9 +121,18 @@ class FarmtilaEnv():
         x, y = agent.position
         if self.seed_grid[x, y] > 0:
             self.seed_grid[x, y] = 0
-            self.owner_grid[x, y] = agent.agent_id
             agent.inventory += 1
             self.last_pickups.append((agent.agent_id, x, y))
+
+    def _plant_farm(self, agent: FarmtilaAgent):
+        if agent.inventory <= 0:
+            return
+        x, y = agent.position
+        if self.farm_grid[x, y]:
+            return
+        self.farm_grid[x, y] = 1
+        self.owner_grid[x, y] = agent.agent_id
+        agent.inventory -= 1
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:

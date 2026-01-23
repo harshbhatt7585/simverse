@@ -110,6 +110,7 @@ class FarmtilaRender:
             env.step(actions)
         self.screen.blit(self.grid_surface, (0, 0))
 
+        self._draw_farms(env)
         self._draw_seeds(env)
 
         # draw each agent using the simplified sprite with index overlay
@@ -173,6 +174,25 @@ class FarmtilaRender:
             cy = int(y) * self.cell_size + offset
             pygame.draw.circle(self.screen, color, (cx, cy), radius)
 
+    def _draw_farms(self, env: FarmtilaEnv):
+        farm_grid = getattr(env, "farm_grid", None)
+        if farm_grid is None:
+            return
+        farms = np.argwhere(farm_grid > 0)
+        if farms.size == 0:
+            return
+        padding = max(2, self.cell_size // 6)
+        for x, y in farms:
+            owner = int(env.owner_grid[x, y]) if env.owner_grid.size else -1
+            color = self._farm_color(owner)
+            rect = pygame.Rect(
+                x * self.cell_size + padding,
+                y * self.cell_size + padding,
+                self.cell_size - padding * 2,
+                self.cell_size - padding * 2,
+            )
+            pygame.draw.rect(self.screen, color, rect, border_radius=4)
+
     def _get_agent_label_surface(self, idx: int) -> pygame.Surface:
         if idx not in self.agent_label_cache:
             surface = self.agent_label_font.render(str(idx), True, (0, 0, 0))
@@ -184,9 +204,12 @@ class FarmtilaRender:
     def _seed_harvest_actions(self, env: FarmtilaEnv) -> dict[int, int]:
         seeds = np.argwhere(env.seed_grid > 0)
         if seeds.size == 0:
-            return {}
+            seeds = np.empty((0, 2), dtype=int)
         actions: dict[int, int] = {}
         for agent in env.agents:
+            if agent.inventory > 0 and env.farm_grid[agent.position[0], agent.position[1]] == 0:
+                actions[agent.agent_id] = env.HARVEST_ACTION
+                continue
             target = self._nearest_seed(agent.position, seeds)
             if target is None:
                 continue
@@ -211,6 +234,17 @@ class FarmtilaRender:
                 best_seed = (int(sx), int(sy))
         return best_seed
 
+    def _farm_color(self, owner: int) -> tuple[int, int, int]:
+        palette = [
+            (205, 133, 63),  # sienna
+            (160, 82, 45),   # saddle brown
+            (210, 180, 140), # tan
+            (222, 184, 135), # burlywood
+        ]
+        if owner < 0:
+            return palette[0]
+        return palette[owner % len(palette)]
+
     
 
 
@@ -218,7 +252,7 @@ class FarmtilaRender:
 
 if __name__ == "__main__":
     render = FarmtilaRender(width=50, height=50)
-    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20, num_agents=1))
+    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20, num_agents=2))
     env.reset()
 
     max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
