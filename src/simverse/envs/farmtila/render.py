@@ -112,7 +112,7 @@ class FarmtilaRender:
         self.agent_label_font = pygame.font.SysFont("Verdana", max(10, self.cell_size // 3), bold=True)
         self.small_font = pygame.font.SysFont("Verdana", max(9, self.cell_size // 4))
         self.panel_title_font = pygame.font.SysFont("Verdana", max(13, self.cell_size // 2), bold=True)
-        self.panel_font = pygame.font.SysFont("Verdana", max(11, int(self.cell_size * 0.4)))
+        self.pagitnel_font = pygame.font.SysFont("Verdana", max(11, int(self.cell_size * 0.4)))
         self.panel_small_font = pygame.font.SysFont("Verdana", max(9, int(self.cell_size * 0.3)))
         self.agent_label_cache: dict[int, pygame.Surface] = {}
         
