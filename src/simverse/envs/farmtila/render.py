@@ -821,6 +821,8 @@ if __name__ == "__main__":
             render.handle_events()
             render.draw(env)
             frames += 1
+            if env.done:
+                break
             if max_frames and frames >= max_frames:
                 break
     except SystemExit:

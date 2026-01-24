@@ -33,9 +33,11 @@ class FarmtilaEnv():
         
         self.steps = 0
         self.last_pickups: List[Tuple[int, int, int]] = []
-    
-        # end of an episode
+
+        # episode bookkeeping
+        self.seeds_spawned = 0
         self.done = False
+
 
     def reset(self):
         self.seed_grid.fill(0)
@@ -44,11 +46,15 @@ class FarmtilaEnv():
         self.agents = self._spawn_agents()
         self.steps = 0
         self.last_pickups = []
+        self.seeds_spawned = 0
+        self.done = False
         self._spawn_seeds_if_due(force=True)
         return self._get_observation()
 
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
         """Advance the simulation by applying actions to agents."""
+        if self.done:
+            return self._get_observation()
         action_map = self._normalize_actions(actions)
         self.last_pickups = []
         for agent in self.agents:
@@ -63,6 +69,7 @@ class FarmtilaEnv():
             self._collect_seed_if_present(agent)
         self.steps += 1
         self._spawn_seeds_if_due()
+        self._check_episode_end()
         return self._get_observation()
 
     
@@ -97,9 +104,10 @@ class FarmtilaEnv():
             "owner_grid": self.owner_grid.copy(),
             "farm_grid": self.farm_grid.copy(),
             "agents": [agent.position for agent in self.agents],
+            "done": self.done,
         }
 
-    def get_grid_seed_random(self, *, force: bool = False) -> List[Tuple[int, int]]:
+    def get_grid_seed_random(self, *, force: bool = False, limit: int | None = None) -> List[Tuple[int, int]]:
         if self.config.spawn_seed_every <= 0 and not force:
             return []
         if not force and self.steps % self.config.spawn_seed_every != 0:
@@ -107,7 +115,15 @@ class FarmtilaEnv():
         total_cells = self.config.width * self.config.height
         if total_cells == 0 or self.config.seeds_per_spawn <= 0:
             return []
-        count = min(self.config.seeds_per_spawn, total_cells)
+        budget = self._remaining_seed_budget()
+        if budget <= 0:
+            return []
+        capped_limit = budget if limit is None else min(limit, budget)
+        if capped_limit <= 0:
+            return []
+        count = min(self.config.seeds_per_spawn, total_cells, capped_limit)
+        if count <= 0:
+            return []
         flat_indices = self.rng.choice(total_cells, size=count, replace=False)
         positions = []
         for idx in np.atleast_1d(flat_indices):
@@ -117,9 +133,13 @@ class FarmtilaEnv():
         return positions
 
     def _spawn_seeds_if_due(self, *, force: bool = False):
-        for x, y in self.get_grid_seed_random(force=force):
+        positions = self.get_grid_seed_random(force=force)
+        if not positions:
+            return
+        for x, y in positions:
             self.seed_grid[x, y] = 1
             self.owner_grid[x, y] = -1
+        self.seeds_spawned += len(positions)
 
     def _collect_seed_if_present(self, agent: FarmtilaAgent):
         x, y = agent.position
@@ -137,6 +157,20 @@ class FarmtilaEnv():
         self.farm_grid[x, y] = 1
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1
+
+    def _remaining_seed_budget(self) -> int:
+        return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
+
+    def _check_episode_end(self):
+        if self.done:
+            return
+        if self._remaining_seed_budget() > 0:
+            return
+        if np.any(self.seed_grid):
+            return
+        if any(agent.inventory > 0 for agent in self.agents):
+            return
+        self.done = True
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:
