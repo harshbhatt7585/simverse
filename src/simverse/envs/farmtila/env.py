@@ -69,10 +69,13 @@ class FarmtilaEnv():
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
                 agent.position = (new_x, new_y)
                 if action == self.HARVEST_ACTION:
-                    self._plant_farm(agent)
+                    if self._plant_farm(agent):
+                        reward = 2
                 elif action == self.PICKUP_ACTION:
                     if self._collect_seed_if_present(agent):
                         reward = 1
+                
+                
                     
             
             
@@ -160,7 +163,7 @@ class FarmtilaEnv():
             return True
         return False
 
-    def _plant_farm(self, agent: FarmtilaAgent):
+    def _plant_farm(self, agent: FarmtilaAgent) -> bool:
         if agent.inventory <= 0:
             return
         x, y = agent.position
@@ -170,6 +173,7 @@ class FarmtilaEnv():
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1
         agent.harvested_tiles += 1
+        return True
 
     def _remaining_seed_budget(self) -> int:
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
