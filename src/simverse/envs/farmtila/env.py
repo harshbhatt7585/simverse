@@ -17,6 +17,7 @@ class FarmtilaAgent:
 
 class FarmtilaEnv():
     HARVEST_ACTION = 4
+    PICKUP_ACTION = 5
 
     def __init__(self, config: FarmtilaConfig):
         self.config = config
@@ -68,7 +69,8 @@ class FarmtilaEnv():
                 agent.position = (new_x, new_y)
                 if action == self.HARVEST_ACTION:
                     self._plant_farm(agent)
-            self._collect_seed_if_present(agent)
+                elif action == self.PICKUP_ACTION:
+                    self._collect_seed_if_present(agent)
         self.steps += 1
         self._spawn_seeds_if_due()
         self.check_episode_end()

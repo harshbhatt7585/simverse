@@ -112,7 +112,7 @@ class FarmtilaRender:
         self.agent_label_font = pygame.font.SysFont("Verdana", max(10, self.cell_size // 3), bold=True)
         self.small_font = pygame.font.SysFont("Verdana", max(9, self.cell_size // 4))
         self.panel_title_font = pygame.font.SysFont("Verdana", max(13, self.cell_size // 2), bold=True)
-        self.pagitnel_font = pygame.font.SysFont("Verdana", max(11, int(self.cell_size * 0.4)))
+        self.panel_font = pygame.font.SysFont("Verdana", max(11, int(self.cell_size * 0.4)))
         self.panel_small_font = pygame.font.SysFont("Verdana", max(9, int(self.cell_size * 0.3)))
         self.agent_label_cache: dict[int, pygame.Surface] = {}
         
@@ -872,11 +872,17 @@ class FarmtilaRender:
     def _seed_harvest_actions(self, env: FarmtilaEnv) -> dict[int, int]:
         actions: dict[int, int] = {}
         for agent in env.agents:
-            if agent.inventory > 0 and env.farm_grid[agent.position[0], agent.position[1]] == 0:
+            ax, ay = agent.position
+            if env.seed_grid[ax, ay] > 0:
+                actions[agent.agent_id] = env.PICKUP_ACTION
+                continue
+            if agent.inventory > 0 and env.farm_grid[ax, ay] == 0:
                 actions[agent.agent_id] = env.HARVEST_ACTION
-                # Add particles for planting
-                self._spawn_particles(agent.position[0] * self.cell_size + self.cell_size // 2,
-                                     agent.position[1] * self.cell_size + self.cell_size // 2, count=5)
+                self._spawn_particles(
+                    ax * self.cell_size + self.cell_size // 2,
+                    ay * self.cell_size + self.cell_size // 2,
+                    count=5,
+                )
                 continue
             rng = getattr(env, "rng", None)
             if rng is None:
