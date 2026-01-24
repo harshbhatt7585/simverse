@@ -97,11 +97,10 @@ class FarmtilaEnv():
     def _spawn_agents(self) -> List[FarmtilaAgent]:
         agents: List[FarmtilaAgent] = []
         occupied = set()
-        rng = np.random.default_rng()
         for agent_id in range(self.config.num_agents):
             while True:
-                x = int(rng.integers(0, self.config.width))
-                y = int(rng.integers(0, self.config.height))
+                x = int(self.rng.integers(0, self.config.width))
+                y = int(self.rng.integers(0, self.config.height))
                 if (x, y) not in occupied:
                     occupied.add((x, y))
                     break
@@ -113,8 +112,19 @@ class FarmtilaEnv():
             "seed_grid": self.seed_grid.copy(),
             "owner_grid": self.owner_grid.copy(),
             "farm_grid": self.farm_grid.copy(),
-            "agents": [agent.position for agent in self.agents],
+            "agents": [
+                {
+                    "id": agent.agent_id,
+                    "position": agent.position,
+                    "inventory": agent.inventory,
+                    "harvested_tiles": agent.harvested_tiles,
+                    "reward": agent.reward,
+                }
+                for agent in self.agents
+            ],
             "done": self.done,
+            "winner": self.winner.agent_id if self.winner else None,
+            "steps": self.steps,
         }
 
     def get_grid_seed_random(self, *, force: bool = False, limit: int | None = None) -> List[Tuple[int, int]]:
@@ -146,10 +156,15 @@ class FarmtilaEnv():
         positions = self.get_grid_seed_random(force=force)
         if not positions:
             return
+        spawned = 0
         for x, y in positions:
+            # Skip cells that already have a seed or a farm
+            if self.seed_grid[x, y] > 0 or self.farm_grid[x, y] > 0:
+                continue
             self.seed_grid[x, y] = 1
-            self.owner_grid[x, y] = -1
-        self.seeds_spawned += len(positions)
+            # Don't reset owner_grid - preserve farm ownership
+            spawned += 1
+        self.seeds_spawned += spawned
 
     def _collect_seed_if_present(self, agent: FarmtilaAgent) -> bool:
         x, y = agent.position
@@ -162,10 +177,10 @@ class FarmtilaEnv():
 
     def _plant_farm(self, agent: FarmtilaAgent) -> bool:
         if agent.inventory <= 0:
-            return
+            return False
         x, y = agent.position
         if self.farm_grid[x, y]:
-            return
+            return False
         self.farm_grid[x, y] = 1
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1
@@ -176,6 +191,12 @@ class FarmtilaEnv():
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
 
     def check_episode_end(self) -> bool:
+        # Check step limit
+        if self.steps >= self.config.max_steps:
+            self.done = True
+            return True
+        
+        # Check if any agent reached the win condition
         for agent in self.agents:
             if agent.harvested_tiles >= self.max_harvested_tiles:
                 self.winner = agent
@@ -183,6 +204,7 @@ class FarmtilaEnv():
                 self.done = True
                 return True
 
+        # Check if seed budget is exhausted
         if self._remaining_seed_budget() <= 0:
             self.done = True
             return True
