@@ -124,6 +124,15 @@ class FarmtilaRender:
         self.running_random = False
         self.env: FarmtilaEnv | None = None
         self.controlled_agent_id = 0
+        
+        # Episode end state
+        self.showing_winner = False
+        self.winner_display_frames = 0
+        self.winner_display_duration = 90  # ~3 seconds at 30fps
+        self.episodes_completed = 0
+        self.big_font = pygame.font.SysFont("Verdana", max(24, self.cell_size), bold=True)
+        self.medium_font = pygame.font.SysFont("Verdana", max(16, int(self.cell_size * 0.6)), bold=True)
+        
         pygame.display.set_caption("🌾 Farmtila")
 
     def _init_display(self) -> pygame.Surface:
@@ -455,9 +464,22 @@ class FarmtilaRender:
         self.env = env
         self.frame_count += 1
         
-        if self.running_random:
+        # Handle episode end and reset
+        if self.showing_winner:
+            self.winner_display_frames += 1
+            if self.winner_display_frames >= self.winner_display_duration:
+                # Reset the episode
+                self.showing_winner = False
+                self.winner_display_frames = 0
+                self.episodes_completed += 1
+                env.reset()
+        elif self.running_random and not env.done:
             actions = self._seed_harvest_actions(env)
             env.step(actions)
+        elif env.done and not self.showing_winner:
+            # Episode just ended, start showing winner
+            self.showing_winner = True
+            self.winner_display_frames = 0
         
         # Draw grass background
         self.screen.blit(self.grass_surface, (0, 0))
@@ -491,6 +513,10 @@ class FarmtilaRender:
         
         # Draw agent stats panel on the right
         self._draw_agent_stats_panel(env)
+        
+        # Draw winner overlay if episode ended
+        if self.showing_winner:
+            self._draw_winner_overlay(env)
         
         pygame.display.flip()
         self.clock.tick(self.fps)
@@ -560,6 +586,107 @@ class FarmtilaRender:
         self.screen.blit(seed_text, (stats_rect.x + 8, stats_rect.y + 6))
         self.screen.blit(farm_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height))
         self.screen.blit(step_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height * 2))
+
+    def _draw_winner_overlay(self, env: FarmtilaEnv):
+        """Draw the winner announcement overlay."""
+        game_width = self.width * self.cell_size
+        game_height = self.height * self.cell_size
+        
+        # Semi-transparent dark overlay
+        overlay = pygame.Surface((game_width, game_height), pygame.SRCALPHA)
+        
+        # Fade in effect
+        fade_progress = min(1.0, self.winner_display_frames / 15)
+        alpha = int(180 * fade_progress)
+        overlay.fill((20, 25, 35, alpha))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Calculate center
+        cx = game_width // 2
+        cy = game_height // 2
+        
+        # Determine winner info
+        if env.winner:
+            winner_id = env.winner.agent_id
+            winner_tiles = env.winner.harvested_tiles
+            winner_color = self.agent_colors[winner_id % len(self.agent_colors)]
+            title_text = "🏆 WINNER! 🏆"
+            winner_name = f"Farmer {winner_id}"
+        else:
+            # No clear winner - find who has most tiles
+            best_agent = max(env.agents, key=lambda a: a.harvested_tiles)
+            winner_id = best_agent.agent_id
+            winner_tiles = best_agent.harvested_tiles
+            winner_color = self.agent_colors[winner_id % len(self.agent_colors)]
+            title_text = "⏱ EPISODE ENDED ⏱"
+            winner_name = f"Leader: Farmer {winner_id}"
+        
+        # Animated scale for bounce effect
+        bounce = 1.0 + 0.1 * math.sin(self.winner_display_frames * 0.3) * max(0, 1 - self.winner_display_frames / 30)
+        
+        # Draw banner background
+        banner_width = int(game_width * 0.7)
+        banner_height = int(self.cell_size * 6)
+        banner_x = cx - banner_width // 2
+        banner_y = cy - banner_height // 2
+        
+        # Banner with gradient
+        banner_surface = pygame.Surface((banner_width, banner_height), pygame.SRCALPHA)
+        for y in range(banner_height):
+            blend = y / banner_height
+            r = int(40 + (winner_color[0] - 40) * 0.3 * (1 - blend))
+            g = int(44 + (winner_color[1] - 44) * 0.3 * (1 - blend))
+            b = int(52 + (winner_color[2] - 52) * 0.3 * (1 - blend))
+            pygame.draw.line(banner_surface, (r, g, b, int(240 * fade_progress)), (0, y), (banner_width, y))
+        
+        # Banner border
+        pygame.draw.rect(banner_surface, winner_color, banner_surface.get_rect(), width=4, border_radius=16)
+        
+        # Inner glow
+        inner_rect = pygame.Rect(4, 4, banner_width - 8, banner_height - 8)
+        pygame.draw.rect(banner_surface, (*winner_color[:3], 30), inner_rect, border_radius=12)
+        
+        self.screen.blit(banner_surface, (banner_x, banner_y))
+        
+        # Title text
+        title_surface = self.big_font.render(title_text, True, (255, 215, 0))  # Gold color
+        title_rect = title_surface.get_rect(center=(cx, banner_y + banner_height // 4))
+        self.screen.blit(title_surface, title_rect)
+        
+        # Winner name with their color
+        name_surface = self.medium_font.render(winner_name, True, winner_color)
+        name_rect = name_surface.get_rect(center=(cx, cy))
+        self.screen.blit(name_surface, name_rect)
+        
+        # Stats
+        stats_text = f"🌾 {winner_tiles} farms harvested in {env.steps} steps"
+        stats_surface = self.panel_font.render(stats_text, True, COLORS["ui_text"])
+        stats_rect = stats_surface.get_rect(center=(cx, banner_y + banner_height * 3 // 4))
+        self.screen.blit(stats_surface, stats_rect)
+        
+        # Countdown to restart
+        remaining_frames = self.winner_display_duration - self.winner_display_frames
+        remaining_seconds = max(0, remaining_frames // 30)
+        countdown_text = f"Restarting in {remaining_seconds + 1}..."
+        countdown_surface = self.small_font.render(countdown_text, True, (150, 150, 160))
+        countdown_rect = countdown_surface.get_rect(center=(cx, banner_y + banner_height + 20))
+        self.screen.blit(countdown_surface, countdown_rect)
+        
+        # Episodes counter
+        if self.episodes_completed > 0:
+            episodes_text = f"Episodes completed: {self.episodes_completed}"
+            episodes_surface = self.small_font.render(episodes_text, True, (100, 100, 110))
+            episodes_rect = episodes_surface.get_rect(center=(cx, banner_y + banner_height + 40))
+            self.screen.blit(episodes_surface, episodes_rect)
+        
+        # Spawn celebration particles
+        if self.winner_display_frames < 30 and self.winner_display_frames % 3 == 0:
+            for _ in range(5):
+                self._spawn_particles(
+                    cx + np.random.randint(-100, 100),
+                    banner_y + np.random.randint(0, banner_height),
+                    count=1
+                )
 
     def _draw_agent_stats_panel(self, env: FarmtilaEnv):
         """Draw the right-side panel showing stats for all agents."""
@@ -814,6 +941,7 @@ if __name__ == "__main__":
     render.run_random_simulation()
 
     max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
+    max_episodes = int(os.environ.get("FARMTILA_MAX_EPISODES", "0"))
     frames = 0
 
     try:
@@ -821,8 +949,11 @@ if __name__ == "__main__":
             render.handle_events()
             render.draw(env)
             frames += 1
-            if env.done:
+            
+            # Check episode limit
+            if max_episodes and render.episodes_completed >= max_episodes:
                 break
+            # Check frame limit
             if max_frames and frames >= max_frames:
                 break
     except SystemExit:
