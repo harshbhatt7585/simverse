@@ -41,6 +41,7 @@ class FarmtilaEnv():
         self.winner: FarmtilaAgent | None = None
         self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
 
+
     def reset(self):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
@@ -70,7 +71,12 @@ class FarmtilaEnv():
                 if action == self.HARVEST_ACTION:
                     self._plant_farm(agent)
                 elif action == self.PICKUP_ACTION:
-                    self._collect_seed_if_present(agent)
+                    if self._collect_seed_if_present(agent):
+                        reward = 1
+                    
+            
+            
+
         self.steps += 1
         self._spawn_seeds_if_due()
         self.check_episode_end()
@@ -145,12 +151,14 @@ class FarmtilaEnv():
             self.owner_grid[x, y] = -1
         self.seeds_spawned += len(positions)
 
-    def _collect_seed_if_present(self, agent: FarmtilaAgent):
+    def _collect_seed_if_present(self, agent: FarmtilaAgent) -> bool:
         x, y = agent.position
         if self.seed_grid[x, y] > 0:
             self.seed_grid[x, y] = 0
             agent.inventory += 1
             self.last_pickups.append((agent.agent_id, x, y))
+            return True
+        return False
 
     def _plant_farm(self, agent: FarmtilaAgent):
         if agent.inventory <= 0:
