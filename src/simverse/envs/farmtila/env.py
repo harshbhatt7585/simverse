@@ -60,6 +60,12 @@ class FarmtilaEnv():
         self.done = False
         self.winner = None
         self._spawn_seeds_if_due(force=True)
+
+        for agent in self.agents:
+            agent.reward = 0.0
+            agent.harvested_tiles = 0
+            agent.inventory = 0
+        
         return self._get_observation()
 
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
