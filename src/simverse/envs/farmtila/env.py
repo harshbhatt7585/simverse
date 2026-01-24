@@ -7,6 +7,7 @@ import numpy as np
 
 from .config import FarmtilaConfig
 
+import gymnasium as gym
 
 @dataclass
 class FarmtilaAgent:
@@ -19,6 +20,11 @@ class FarmtilaAgent:
 class FarmtilaEnv():
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
+    ACTION_SPACE = gym.spaces.Discrete(6)
+
+    @property
+    def action_space(self):
+        return self.ACTION_SPACE
 
     def __init__(self, config: FarmtilaConfig):
         self.config = config
