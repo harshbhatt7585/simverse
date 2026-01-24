@@ -179,7 +179,7 @@ class FarmtilaEnv():
         for agent in self.agents:
             if agent.harvested_tiles >= self.max_harvested_tiles:
                 self.winner = agent
-                agent.reward += 10.0
+                agent.reward += 20.0
                 self.done = True
                 return True
 
