@@ -24,6 +24,7 @@ class FarmtilaEnv():
         self.owner_grid = np.full((config.width, config.height), -1)
         self.farm_grid = np.zeros((config.width, config.height), dtype=np.uint8)
 
+    
         # Agent class have their own position
 
         self.agents: List[FarmtilaAgent] = []
@@ -33,6 +34,9 @@ class FarmtilaEnv():
         self.steps = 0
         self.last_pickups: List[Tuple[int, int, int]] = []
     
+        # end of an episode
+        self.done = False
+
     def reset(self):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
