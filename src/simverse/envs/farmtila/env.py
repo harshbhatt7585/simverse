@@ -15,7 +15,7 @@ class FarmtilaAgent:
     inventory: int = 0
     harvested_tiles: int = 0
     reward: float = 0
-    
+
 class FarmtilaEnv():
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
@@ -65,6 +65,7 @@ class FarmtilaEnv():
         for agent in self.agents:
             action = action_map.get(agent.agent_id)
             if action is not None:
+                reward = 0
                 dx, dy = self._action_to_delta(action)
                 new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
