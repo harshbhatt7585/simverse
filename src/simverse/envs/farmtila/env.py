@@ -14,7 +14,8 @@ class FarmtilaAgent:
     position: tuple[int, int]
     inventory: int = 0
     harvested_tiles: int = 0
-
+    reward: float = 0
+    
 class FarmtilaEnv():
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
@@ -74,6 +75,8 @@ class FarmtilaEnv():
                 elif action == self.PICKUP_ACTION:
                     if self._collect_seed_if_present(agent):
                         reward = 1
+                agent.reward += reward
+
                 
                 
                     
