@@ -63,27 +63,20 @@ class FarmtilaEnv():
         action_map = self._normalize_actions(actions)
         self.last_pickups = []
         for agent in self.agents:
+            reward = -0.01
             action = action_map.get(agent.agent_id)
             if action is not None:
-                reward = 0
                 dx, dy = self._action_to_delta(action)
                 new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
                 agent.position = (new_x, new_y)
                 if action == self.HARVEST_ACTION:
                     if self._plant_farm(agent):
-                        reward = 2
+                        reward += 5.0
                 elif action == self.PICKUP_ACTION:
                     if self._collect_seed_if_present(agent):
-                        reward = 1
-                agent.reward += reward
-
-                
-                
-                    
-            
-            
-
+                        reward += 1.0
+            agent.reward += reward
         self.steps += 1
         self._spawn_seeds_if_due()
         self.check_episode_end()
@@ -186,6 +179,7 @@ class FarmtilaEnv():
         for agent in self.agents:
             if agent.harvested_tiles >= self.max_harvested_tiles:
                 self.winner = agent
+                agent.reward += 10.0
                 self.done = True
                 return True
 
