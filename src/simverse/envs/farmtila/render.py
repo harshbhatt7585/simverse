@@ -475,7 +475,7 @@ class FarmtilaRender:
                 env.reset()
         elif self.running_random and not env.done:
             actions = self._seed_harvest_actions(env)
-            env.step(actions)
+            _obs, _rewards, _done, _info = env.step(actions)
         elif env.done and not self.showing_winner:
             # Episode just ended, start showing winner
             self.showing_winner = True

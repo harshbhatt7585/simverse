@@ -59,7 +59,7 @@ class FarmtilaEnv():
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
         """Advance the simulation by applying actions to agents."""
         if self.done:
-            return self._get_observation()
+            return self._package_step_result()
         action_map = self._normalize_actions(actions)
         self.last_pickups = []
         for agent in self.agents:
@@ -80,7 +80,7 @@ class FarmtilaEnv():
         self.steps += 1
         self._spawn_seeds_if_due()
         self.check_episode_end()
-        return self._get_observation()
+        return self._package_step_result()
 
     
     def step_random(self):
@@ -209,6 +209,18 @@ class FarmtilaEnv():
             self.done = True
             return True
         return False
+
+    def _package_step_result(self):
+        obs = self._get_observation()
+        rewards = {agent.agent_id: agent.reward for agent in self.agents}
+        for agent in self.agents:
+            agent.reward = 0.0
+        dones = self.done
+        info = {
+            "winner": self.winner.agent_id if self.winner else None,
+            "steps": self.steps,
+        }
+        return obs, rewards, dones, info
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:
