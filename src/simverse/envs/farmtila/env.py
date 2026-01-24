@@ -1,23 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
-
-from .config import FarmtilaConfig
-
 import gymnasium as gym
 
-@dataclass
-class FarmtilaAgent:
-    agent_id: int
-    position: tuple[int, int]
-    inventory: int = 0
-    harvested_tiles: int = 0
-    reward: float = 0
+from simverse.envs.farmtila.config import FarmtilaConfig
+from simverse.envs.farmtila.agent import FarmtilaAgent
 
-class FarmtilaEnv():
+
+class FarmtilaEnv:
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
     ACTION_SPACE = gym.spaces.Discrete(6)
@@ -32,22 +24,16 @@ class FarmtilaEnv():
         self.seed_grid = np.zeros((config.width, config.height))
         self.owner_grid = np.full((config.width, config.height), -1)
         self.farm_grid = np.zeros((config.width, config.height), dtype=np.uint8)
-    
-        # Agent class have their own position
 
         self.agents: List[FarmtilaAgent] = []
-
         self.rng = np.random.default_rng()
-        
+
         self.steps = 0
         self.last_pickups: List[Tuple[int, int, int]] = []
-
-        # episode bookkeeping
         self.seeds_spawned = 0
         self.done = False
         self.winner: FarmtilaAgent | None = None
         self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
-
 
     def reset(self):
         self.seed_grid.fill(0)
@@ -55,21 +41,16 @@ class FarmtilaEnv():
         self.farm_grid.fill(0)
         self.agents = self._spawn_agents()
         self.steps = 0
-        self.last_pickups = []
+        self.last_pickups.clear()
         self.seeds_spawned = 0
         self.done = False
         self.winner = None
         self._spawn_seeds_if_due(force=True)
-
         for agent in self.agents:
-            agent.reward = 0.0
-            agent.harvested_tiles = 0
-            agent.inventory = 0
-        
+            agent.reset()
         return self._get_observation()
 
     def step(self, actions: Dict[int, int] | Iterable[int] | int | None = None):
-        """Advance the simulation by applying actions to agents."""
         if self.done:
             return self._package_step_result()
         action_map = self._normalize_actions(actions)
@@ -94,11 +75,9 @@ class FarmtilaEnv():
         self.check_episode_end()
         return self._package_step_result()
 
-    
     def step_random(self):
-        """Apply a random move to every agent."""
         actions = {
-            agent.agent_id: int(self.rng.integers(0, 4))  # movement actions only
+            agent.agent_id: int(self.rng.integers(0, 4))
             for agent in self.agents
         }
         return self.step(actions)
@@ -116,7 +95,13 @@ class FarmtilaEnv():
                 if (x, y) not in occupied:
                     occupied.add((x, y))
                     break
-            agents.append(FarmtilaAgent(agent_id=agent_id, position=(x, y)))
+            agents.append(
+                FarmtilaAgent(
+                    agent_id=agent_id,
+                    position=(x, y),
+                    action_space=np.arange(self.ACTION_SPACE.n, dtype=np.int64),
+                )
+            )
         return agents
 
     def _get_observation(self):
@@ -170,11 +155,9 @@ class FarmtilaEnv():
             return
         spawned = 0
         for x, y in positions:
-            # Skip cells that already have a seed or a farm
             if self.seed_grid[x, y] > 0 or self.farm_grid[x, y] > 0:
                 continue
             self.seed_grid[x, y] = 1
-            # Don't reset owner_grid - preserve farm ownership
             spawned += 1
         self.seeds_spawned += spawned
 
@@ -203,24 +186,36 @@ class FarmtilaEnv():
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
 
     def check_episode_end(self) -> bool:
-        # Check step limit
         if self.steps >= self.config.max_steps:
             self.done = True
             return True
-        
-        # Check if any agent reached the win condition
         for agent in self.agents:
             if agent.harvested_tiles >= self.max_harvested_tiles:
                 self.winner = agent
                 agent.reward += 20.0
                 self.done = True
                 return True
-
-        # Check if seed budget is exhausted
         if self._remaining_seed_budget() <= 0:
             self.done = True
             return True
         return False
+
+    def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
+        if actions is None:
+            return {}
+        if isinstance(actions, dict):
+            return actions
+        if isinstance(actions, int):
+            return {0: actions}
+        return {agent_id: action for agent_id, action in enumerate(actions)}
+
+    def _action_to_delta(self, action: int) -> tuple[int, int]:
+        return {
+            0: (0, -1),
+            1: (0, 1),
+            2: (-1, 0),
+            3: (1, 0),
+        }.get(action, (0, 0))
 
     def _package_step_result(self):
         obs = self._get_observation()
@@ -233,21 +228,3 @@ class FarmtilaEnv():
             "steps": self.steps,
         }
         return obs, rewards, dones, info
-
-    def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
-        if actions is None:
-            return {}
-        if isinstance(actions, dict):
-            return actions
-        if isinstance(actions, int):
-            return {0: actions}
-        # treat iterable as ordered by agent id
-        return {agent_id: action for agent_id, action in enumerate(actions)}
-
-    def _action_to_delta(self, action: int) -> tuple[int, int]:
-        return {
-            0: (0, -1),  # up
-            1: (0, 1),   # down
-            2: (-1, 0),  # left
-            3: (1, 0),   # right
-        }.get(action, (0, 0))
