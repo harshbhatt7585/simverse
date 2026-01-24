@@ -81,6 +81,11 @@ class FarmtilaRender:
         self.cell_size = cell_size
         self.fps = fps
         self.clock = pygame.time.Clock()
+        
+        # Right panel dimensions
+        self.panel_width = int(cell_size * 7)
+        self.panel_padding = 12
+        
         self.screen = self._init_display()
         
         # Animation state
@@ -90,6 +95,14 @@ class FarmtilaRender:
         # Pre-render surfaces
         self.grass_surface = self._build_grass_surface()
         self.agent_surfaces = self._build_agent_surfaces()
+        self.agent_colors = [
+            (70, 130, 180),   # Steel blue
+            (180, 90, 70),    # Terracotta
+            (130, 100, 160),  # Lavender
+            (100, 160, 130),  # Sage
+            (180, 140, 80),   # Mustard
+            (160, 80, 120),   # Mauve
+        ]
         self.seed_surface = self._build_seed_surface()
         self.farm_surfaces = self._build_farm_surfaces()
         
@@ -98,6 +111,9 @@ class FarmtilaRender:
         self.font = pygame.font.SysFont("Verdana", max(12, self.cell_size // 2), bold=True)
         self.agent_label_font = pygame.font.SysFont("Verdana", max(10, self.cell_size // 3), bold=True)
         self.small_font = pygame.font.SysFont("Verdana", max(9, self.cell_size // 4))
+        self.panel_title_font = pygame.font.SysFont("Verdana", max(13, self.cell_size // 2), bold=True)
+        self.panel_font = pygame.font.SysFont("Verdana", max(11, int(self.cell_size * 0.4)))
+        self.panel_small_font = pygame.font.SysFont("Verdana", max(9, int(self.cell_size * 0.3)))
         self.agent_label_cache: dict[int, pygame.Surface] = {}
         
         # UI elements
@@ -111,7 +127,10 @@ class FarmtilaRender:
         pygame.display.set_caption("🌾 Farmtila")
 
     def _init_display(self) -> pygame.Surface:
-        size = (self.width * self.cell_size, self.height * self.cell_size)
+        # Add panel width to the right side
+        game_width = self.width * self.cell_size
+        total_width = game_width + self.panel_width
+        size = (total_width, self.height * self.cell_size)
         try:
             return pygame.display.set_mode(size)
         except pygame.error:
@@ -470,6 +489,9 @@ class FarmtilaRender:
         self._draw_button()
         self._draw_stats(env)
         
+        # Draw agent stats panel on the right
+        self._draw_agent_stats_panel(env)
+        
         pygame.display.flip()
         self.clock.tick(self.fps)
     
@@ -538,6 +560,130 @@ class FarmtilaRender:
         self.screen.blit(seed_text, (stats_rect.x + 8, stats_rect.y + 6))
         self.screen.blit(farm_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height))
         self.screen.blit(step_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height * 2))
+
+    def _draw_agent_stats_panel(self, env: FarmtilaEnv):
+        """Draw the right-side panel showing stats for all agents."""
+        panel_x = self.width * self.cell_size
+        panel_height = self.height * self.cell_size
+        
+        # Panel background - darker theme
+        panel_surface = pygame.Surface((self.panel_width, panel_height))
+        panel_surface.fill(COLORS["ui_bg"])
+        
+        # Subtle gradient overlay for depth
+        for y in range(panel_height):
+            alpha = int(15 * (1 - y / panel_height))
+            overlay_color = (255, 255, 255, alpha)
+            overlay_line = pygame.Surface((self.panel_width, 1), pygame.SRCALPHA)
+            overlay_line.fill(overlay_color)
+            panel_surface.blit(overlay_line, (0, y))
+        
+        self.screen.blit(panel_surface, (panel_x, 0))
+        
+        # Left border accent line
+        pygame.draw.line(self.screen, COLORS["ui_accent"], (panel_x, 0), (panel_x, panel_height), 2)
+        
+        # Panel title
+        title_text = self.panel_title_font.render("AGENTS", True, COLORS["ui_accent"])
+        title_x = panel_x + (self.panel_width - title_text.get_width()) // 2
+        self.screen.blit(title_text, (title_x, self.panel_padding))
+        
+        # Decorative line under title
+        line_y = self.panel_padding + title_text.get_height() + 6
+        pygame.draw.line(self.screen, COLORS["ui_accent"], 
+                        (panel_x + self.panel_padding, line_y), 
+                        (panel_x + self.panel_width - self.panel_padding, line_y), 1)
+        
+        # Calculate farm ownership for each agent
+        agent_farms = {}
+        for agent in env.agents:
+            agent_farms[agent.agent_id] = int(np.sum(env.owner_grid == agent.agent_id))
+        
+        # Draw each agent's stats
+        card_start_y = line_y + 12
+        card_height = max(60, int(self.cell_size * 2.2))
+        card_spacing = 8
+        
+        for idx, agent in enumerate(env.agents):
+            card_y = card_start_y + idx * (card_height + card_spacing)
+            
+            # Skip if card would be off-screen
+            if card_y + card_height > panel_height - self.panel_padding:
+                # Draw overflow indicator
+                overflow_text = self.panel_small_font.render(f"+ {len(env.agents) - idx} more...", True, COLORS["ui_text"])
+                self.screen.blit(overflow_text, (panel_x + self.panel_padding, card_y))
+                break
+            
+            self._draw_agent_card(env, agent, idx, panel_x, card_y, card_height, agent_farms.get(agent.agent_id, 0))
+
+    def _draw_agent_card(self, env: FarmtilaEnv, agent, idx: int, panel_x: int, card_y: int, card_height: int, farm_count: int):
+        """Draw a single agent's stat card."""
+        card_width = self.panel_width - self.panel_padding * 2
+        card_x = panel_x + self.panel_padding
+        
+        # Card background
+        agent_color = self.agent_colors[idx % len(self.agent_colors)]
+        card_surface = pygame.Surface((card_width, card_height), pygame.SRCALPHA)
+        
+        # Subtle gradient background with agent color tint
+        base_bg = (50, 54, 62)
+        for y in range(card_height):
+            blend = y / card_height
+            r = int(base_bg[0] + (agent_color[0] - base_bg[0]) * 0.1 * (1 - blend))
+            g = int(base_bg[1] + (agent_color[1] - base_bg[1]) * 0.1 * (1 - blend))
+            b = int(base_bg[2] + (agent_color[2] - base_bg[2]) * 0.1 * (1 - blend))
+            pygame.draw.line(card_surface, (r, g, b, 220), (0, y), (card_width, y))
+        
+        # Card border with agent color
+        pygame.draw.rect(card_surface, agent_color, card_surface.get_rect(), width=2, border_radius=8)
+        self.screen.blit(card_surface, (card_x, card_y))
+        
+        # Agent color indicator bar on left
+        indicator_rect = pygame.Rect(card_x + 4, card_y + 8, 4, card_height - 16)
+        pygame.draw.rect(self.screen, agent_color, indicator_rect, border_radius=2)
+        
+        # Content area
+        content_x = card_x + 16
+        content_y = card_y + 8
+        
+        # Agent header with ID
+        header_text = self.panel_font.render(f"Farmer {idx}", True, COLORS["ui_text"])
+        self.screen.blit(header_text, (content_x, content_y))
+        
+        # Position text (smaller)
+        pos_text = self.panel_small_font.render(f"({agent.position[0]}, {agent.position[1]})", True, (150, 150, 160))
+        self.screen.blit(pos_text, (content_x + header_text.get_width() + 6, content_y + 2))
+        
+        # Stats row
+        stats_y = content_y + header_text.get_height() + 6
+        
+        # Inventory stat with icon
+        inv_icon_color = COLORS["seed_glow"] if agent.inventory > 0 else (100, 100, 110)
+        pygame.draw.circle(self.screen, inv_icon_color, (content_x + 6, stats_y + 8), 5)
+        pygame.draw.circle(self.screen, (60, 120, 40), (content_x + 6, stats_y + 4), 2)  # sprout
+        
+        inv_label = self.panel_small_font.render("Inventory:", True, (150, 150, 160))
+        self.screen.blit(inv_label, (content_x + 16, stats_y))
+        
+        inv_value_color = (100, 255, 150) if agent.inventory > 0 else COLORS["ui_text"]
+        inv_value = self.panel_font.render(str(agent.inventory), True, inv_value_color)
+        self.screen.blit(inv_value, (content_x + 16 + inv_label.get_width() + 4, stats_y - 2))
+        
+        # Farms stat with icon
+        farms_y = stats_y + 18
+        farm_icon_color = COLORS["soil_light"] if farm_count > 0 else (100, 100, 110)
+        farm_icon_rect = pygame.Rect(content_x + 2, farms_y + 3, 8, 8)
+        pygame.draw.rect(self.screen, farm_icon_color, farm_icon_rect, border_radius=2)
+        # Small crop on farm icon
+        if farm_count > 0:
+            pygame.draw.line(self.screen, (80, 160, 60), (content_x + 6, farms_y + 6), (content_x + 6, farms_y + 1), 1)
+        
+        farm_label = self.panel_small_font.render("Farms:", True, (150, 150, 160))
+        self.screen.blit(farm_label, (content_x + 16, farms_y))
+        
+        farm_value_color = (255, 200, 100) if farm_count > 0 else COLORS["ui_text"]
+        farm_value = self.panel_font.render(str(farm_count), True, farm_value_color)
+        self.screen.blit(farm_value, (content_x + 16 + farm_label.get_width() + 4, farms_y - 2))
 
     def _render_button_text(self, label: str) -> pygame.Surface:
         return self.font.render(label, True, COLORS["ui_text"])
