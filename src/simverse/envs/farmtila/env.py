@@ -40,19 +40,6 @@ class FarmtilaEnv():
         self.winner: FarmtilaAgent | None = None
         self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
 
-    def check_episode_end(self):
-        for agent in self.agents:
-            if agent.harvested_tiles >= self.config.max_harvested_tiles:
-                self.winner = agent
-                self.done = True
-                return True
-        
-        if self._remaining_seed_budget() > 0:
-            self.done = True
-            return True
-            
-        return False
-
     def reset(self):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
