@@ -13,6 +13,7 @@ class FarmtilaAgent:
     agent_id: int
     position: tuple[int, int]
     inventory: int = 0
+    harvested_tiles: int = 0
 
 class FarmtilaEnv():
     HARVEST_ACTION = 4
@@ -23,7 +24,6 @@ class FarmtilaEnv():
         self.seed_grid = np.zeros((config.width, config.height))
         self.owner_grid = np.full((config.width, config.height), -1)
         self.farm_grid = np.zeros((config.width, config.height), dtype=np.uint8)
-
     
         # Agent class have their own position
 
@@ -37,7 +37,21 @@ class FarmtilaEnv():
         # episode bookkeeping
         self.seeds_spawned = 0
         self.done = False
+        self.winner: FarmtilaAgent | None = None
+        self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
 
+    def check_episode_end(self):
+        for agent in self.agents:
+            if agent.harvested_tiles >= self.config.max_harvested_tiles:
+                self.winner = agent
+                self.done = True
+                return True
+        
+        if self._remaining_seed_budget() > 0:
+            self.done = True
+            return True
+            
+        return False
 
     def reset(self):
         self.seed_grid.fill(0)
@@ -48,6 +62,7 @@ class FarmtilaEnv():
         self.last_pickups = []
         self.seeds_spawned = 0
         self.done = False
+        self.winner = None
         self._spawn_seeds_if_due(force=True)
         return self._get_observation()
 
@@ -69,7 +84,7 @@ class FarmtilaEnv():
             self._collect_seed_if_present(agent)
         self.steps += 1
         self._spawn_seeds_if_due()
-        self._check_episode_end()
+        self.check_episode_end()
         return self._get_observation()
 
     
@@ -157,20 +172,22 @@ class FarmtilaEnv():
         self.farm_grid[x, y] = 1
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1
+        agent.harvested_tiles += 1
 
     def _remaining_seed_budget(self) -> int:
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
 
-    def _check_episode_end(self):
-        if self.done:
-            return
-        if self._remaining_seed_budget() > 0:
-            return
-        if np.any(self.seed_grid):
-            return
-        if any(agent.inventory > 0 for agent in self.agents):
-            return
-        self.done = True
+    def check_episode_end(self) -> bool:
+        for agent in self.agents:
+            if agent.harvested_tiles >= self.max_harvested_tiles:
+                self.winner = agent
+                self.done = True
+                return True
+
+        if self._remaining_seed_budget() <= 0:
+            self.done = True
+            return True
+        return False
 
     def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
         if actions is None:
