@@ -8,8 +8,9 @@ import gymnasium as gym
 from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.agent import FarmtilaAgent
 
+from simverse.abstractor.simenv import SimEnv
 
-class FarmtilaEnv:
+class FarmtilaEnv(SimEnv):
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
     ACTION_SPACE = gym.spaces.Discrete(6)
