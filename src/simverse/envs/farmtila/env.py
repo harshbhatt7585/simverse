@@ -19,6 +19,15 @@ class FarmtilaEnv(SimEnv):
     def action_space(self):
         return self.ACTION_SPACE
 
+    @property
+    def observation_space(self):
+        return gym.spaces.Box(
+            low=-1,
+            high=max(self.config.num_agents, 1),
+            shape=(3, self.config.width, self.config.height),
+            dtype=np.float32,
+        )
+
     def __init__(self, config: FarmtilaConfig):
         self.config = config
 
@@ -85,6 +94,10 @@ class FarmtilaEnv(SimEnv):
 
     def render(self):
         pass
+
+    def get_observation(self):
+        """Public method required by SimEnv abstract class."""
+        return self._get_observation()
 
     def _spawn_agents(self) -> List[FarmtilaAgent]:
         agents: List[FarmtilaAgent] = []
