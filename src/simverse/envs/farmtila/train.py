@@ -31,25 +31,25 @@ def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAg
 
 
 def train():
-    env = FarmtilaEnv(
-        config=FarmtilaConfig(
-            width=30,
-            height=20,
-            num_agents=4,
-            total_seeds_per_episode=500,
-            max_steps=10000,
-            spawn_seed_every=100,
-            seeds_per_spawn=10,
-        ),
-        policies=[
-            PolicySpec(
-                name="simple",
-                model=SimplePolicy(
-                    obs_space=env.observation_space,
-                    action_space=env.action_space,
-                )
-        )]
+    config = FarmtilaConfig(
+        width=30,
+        height=20,
+        num_agents=4,
+        total_seeds_per_episode=500,
+        max_steps=10000,
+        spawn_seed_every=100,
+        seeds_per_spawn=10,
+        policies=[],
     )
+    env = FarmtilaEnv(config=config)
+    policy_spec = PolicySpec(
+        name="simple",
+        model=SimplePolicy(
+            obs_space=env.observation_space,
+            action_space=env.action_space,
+        ),
+    )
+    env.config.policies = [policy_spec]
 
     loss_trainer = PPOTrainer(
         optimizer=torch.optim.Adam(env.policy.parameters(), lr=0.001),
