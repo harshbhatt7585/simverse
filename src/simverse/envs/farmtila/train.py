@@ -7,6 +7,18 @@ from simverse.config.policy import PolicySpec
 from simverse.policies.simple import SimplePolicy
 from simverse.losses.ppo import PPOTrainer
 import torch
+from simverse.abstractor.policy import Policy
+from simverse.envs.farmtila.agent import FarmtilaAgent
+import random
+
+
+def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
+    return FarmtilaAgent(
+        agent_id=agent_id,
+        position=(random.randint(0, env.config.width - 1), random.randint(0, env.config.height - 1)),
+        action_space=env.action_space,
+        policy=policy,
+    )
 
 
 def train():
@@ -41,7 +53,7 @@ def train():
         num_agents=4,
         policies=env.config.policies,
         loss_trainer=loss_trainer,
-        agent_factory=FarmtilaAgent, # TODO: create a factory for the agents
+        agent_factory=agent_factory
     )
 
     # starts the training
