@@ -105,10 +105,12 @@ class FarmtilaEnv:
         return agents
 
     def _get_observation(self):
+        
+        # [3, width, height]
+        obs = np.stack([self.seed_grid, self.owner_grid, self.farm_grid], axis=0)
+
         return {
-            "seed_grid": self.seed_grid.copy(),
-            "owner_grid": self.owner_grid.copy(),
-            "farm_grid": self.farm_grid.copy(),
+            "obs": obs,
             "agents": [
                 {
                     "id": agent.agent_id,
