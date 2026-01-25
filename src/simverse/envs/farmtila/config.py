@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-import numpy as np
+from dataclasses import dataclass, field
+from typing import List, Any
 
 @dataclass
 class FarmtilaConfig:
@@ -10,3 +10,4 @@ class FarmtilaConfig:
     seeds_per_spawn: int = 10
     max_steps: int = 10000
     total_seeds_per_episode: int = 500
+    policies: List[Any] = field(default_factory=list)
