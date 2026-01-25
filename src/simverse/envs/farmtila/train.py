@@ -1,3 +1,13 @@
+from __future__ import annotations
+
+from pathlib import Path
+import random
+import sys
+
+if __package__ is None or __package__.startswith("__main__"):
+    _src = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(_src))
+
 from simverse.simulator import Simulator
 
 from simverse.envs.farmtila.env import FarmtilaEnv
@@ -9,7 +19,6 @@ from simverse.losses.ppo import PPOTrainer
 import torch
 from simverse.abstractor.policy import Policy
 from simverse.envs.farmtila.agent import FarmtilaAgent
-import random
 
 
 def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
@@ -60,4 +69,7 @@ def train():
     simulator.train()
 
 
+
+if __name__ == "__main__":
+    train()
     
