@@ -6,7 +6,7 @@ from typing import List
 import torch.nn.functional as F
 from simverse.utils.replay_buffer import ReplayBuffer
 from simverse.utils.replay_buffer import Experience
-
+from simverse.abstractor.simenv import SimEnv
 
 
 class PPOTrainer(Trainer):
@@ -18,17 +18,12 @@ class PPOTrainer(Trainer):
 
     def __init__(
         self,
-        env,
-        agents: List[SimAgent],
         optimizer: torch.optim.Optimizer,
-        *,
         episodes: int = 1,
         training_epochs: int = 4,
         clip_epsilon: float = 0.2,
     ):
         super().__init__()
-        self.env = env
-        self.agents = agents
 
         self.optimizer = optimizer
         self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE)
@@ -49,8 +44,12 @@ class PPOTrainer(Trainer):
 
     
     def train(
-        self
+        self,
+        env: SimEnv,
+        agents: List[SimAgent],
     ):
+        self.env = env
+        self.agents = agents
         for _ in range(self.episodes):
 
             self.env.reset()
