@@ -5,6 +5,7 @@ from simverse.abstractor.agent import SimAgent
 from typing import List
 import torch.nn.functional as F
 from simverse.utils.replay_buffer import ReplayBuffer
+from simverse.utils.replay_buffer import Experience
 
 
 
@@ -47,10 +48,23 @@ class PPOTrainer(Trainer):
             for agent in self.agents:
                 agent.policy.eval()
                 with torch.no_grad():
-                    action = agent.action(obs) # this will call the neural net (policy) to compute the logits and value
+                    logits, value = agent.policy(obs) # this will call the neural net (policy) to compute the logits and value
+                    dist = torch.distributions.Categorical(logits)
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action)
                     obs, reward, done, info = self.env.step(action)
+
                     # store the data into buffer
-                    self.replay_buffer.add((obs, action, reward, done, info))
+                    self.replay_buffer.add(
+                        Experience(
+                            observation=obs,
+                            action=action,
+                            log_prob=log_prob,
+                            value=value,
+                            reward=reward,
+                            done=done,
+                            info=info
+                    ))
                 
                 # update the agent's memory
             

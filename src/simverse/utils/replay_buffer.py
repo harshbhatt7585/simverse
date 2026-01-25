@@ -5,6 +5,9 @@ from typing import Dict, List
 @dataclass
 class Experience:
     observation: Dict 
+    action: List[int]
+    log_prob: List[float]
+    value: List[float]
     reward: List[float]
     done: List[bool]
     info: List[Dict]
