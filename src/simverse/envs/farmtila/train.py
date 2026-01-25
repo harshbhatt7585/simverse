@@ -50,9 +50,11 @@ def train():
         ),
     )
     env.config.policies = [policy_spec]
+    
+    policy_models = [ps.model for ps in env.config.policies]
 
     loss_trainer = PPOTrainer(
-        optimizer=torch.optim.Adam(env.policy.parameters(), lr=0.001),
+        optimizer=torch.optim.Adam(policy_spec.model.parameters(), lr=0.001),
         episodes=100,
         training_epochs=10,
         clip_epsilon=0.2,
@@ -60,7 +62,7 @@ def train():
     simulator = Simulator(
         env=env,
         num_agents=4,
-        policies=env.config.policies,
+        policies=policy_models,  # Pass the actual models, not PolicySpec
         loss_trainer=loss_trainer,
         agent_factory=agent_factory
     )
