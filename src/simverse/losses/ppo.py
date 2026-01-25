@@ -1,13 +1,20 @@
-from simverse.abstractor.simulator import Simulator
 import torch
 import torch.nn as nn
-from simverse.abstractor.loss import Loss
+from simverse.abstractor.trainer import Trainer
 from simverse.abstractor.agent import SimAgent
 from typing import List
 import torch.nn.functional as F
+from simverse.utils.replay_buffer import ReplayBuffer
 
 
-class PPO(Loss):
+
+class PPOTrainer(Trainer):
+
+    BUFFER_SIZE = 10000
+    BATCH_SIZE = 1
+
+
+
     def __init__(
         self,
         env,
@@ -19,6 +26,7 @@ class PPO(Loss):
         self.agents = agents
 
         self.optimizer = optimizer
+        self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE)
 
 
     
@@ -41,9 +49,8 @@ class PPO(Loss):
                 action = agent.action(obs) # this will call the neural net (policy) to compute the logits and value
                 obs, reward, done, info = self.env.step(action)
 
-                #
-                      # store the data into buffer
-                #
+                # store the data into buffer
+                self.replay_buffer.add((obs, action, reward, done, info))
                 
                 # update the agent's memory
             
