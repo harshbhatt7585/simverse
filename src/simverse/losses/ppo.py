@@ -46,11 +46,11 @@ class PPOTrainer(Trainer):
             # each agent has their own policy to take action
             for agent in self.agents:
                 agent.policy.eval()
-                action = agent.action(obs) # this will call the neural net (policy) to compute the logits and value
-                obs, reward, done, info = self.env.step(action)
-
-                # store the data into buffer
-                self.replay_buffer.add((obs, action, reward, done, info))
+                with torch.no_grad():
+                    action = agent.action(obs) # this will call the neural net (policy) to compute the logits and value
+                    obs, reward, done, info = self.env.step(action)
+                    # store the data into buffer
+                    self.replay_buffer.add((obs, action, reward, done, info))
                 
                 # update the agent's memory
             
