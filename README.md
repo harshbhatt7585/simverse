@@ -24,6 +24,20 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
 3. policy is the core neural network of a agent which help them to learn the ENV.
 4. policy can be any neural network like Transformers, LLM, CNN, RNN, LSTM, World Models, etc.
 
+## How to Use (development)
+Create a simulator with your environment, policies, and agent count, then kick off training:
+
+```python
+from simverse.simulator import Simulator
+
+sim = Simulator(env="farmtila", num_agents=10, policies=["simple", "transformer"])
+sim.train(
+    loss="ppo",
+    optimizer="adam",
+    epochs=100,
+)
+```
+
 ## Development Setup
 1. Install Simverse in editable mode with the dev extras:
    ```bash
@@ -37,4 +51,3 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
    ```bash
    pre-commit run --all-files
    ```
-
