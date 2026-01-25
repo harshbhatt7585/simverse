@@ -76,25 +76,23 @@ class PPOTrainer(Trainer):
                 # sample the data from buffer
                 batch = self.replay_buffer.sample(self.BATCH_SIZE)
 
-                (_obs, _action, reward, _, _info) = batch
+                (_obs, _action, _log_prob, _value, reward, _, _info) = batch
 
                 # get the action logits and value
                 logits, value = agent.policy(obs)
+                dist = torch.distributions.Categorical(logits)
+                action = dist.sample()
+                log_prob = dist.log_prob(action)
 
-                # get the action
-                log_probs = F.log_softmax(logits, dim=1)
-                action = torch.argmax(logits, dim=1)
 
 
                 # compute the loss
                 advantage = self.compute_gae(reward, value)
 
-                ppo_loss = self.compute_ppo_loss(
-                    log_probs,
-                    action,
-                    advantage,
-                    value
-                )
+                ratio = torch.exp(log_prob - _log_prob)
+                surr = ratio * advantage
+                surr_clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantage
+                ppo_loss = -torch.min(surr, surr_clipped).mean()
 
                 self.optimizer.zero_grad()
 
