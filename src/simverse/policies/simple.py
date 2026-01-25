@@ -18,18 +18,25 @@ from simverse.policies.policy import Policy
 class SimplePolicy(Policy):
     def __init__(
         self,
-        obs_space ,
+        obs_space,
         action_space,
     ):
         super().__init__()
 
+        channels, height, width = obs_space.shape
+        self.obs_encoder = nn.Sequential(
+            nn.Conv2d(channels, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
 
-        # obs encoder
-        self.obs_dim = int(np.prod(obs_space.shape))
-        self.obs_encoder = nn.Linear(self.obs_dim, 128)
+        with torch.no_grad():
+            dummy = torch.zeros(1, channels, height, width)
+            conv_out_dim = self.obs_encoder(dummy).shape[1]
 
-        # decoder
-        self.fc1 = nn.Linear(128, 128)
+        self.fc1 = nn.Linear(conv_out_dim, 128)
         
         # action head
         self.action_head = nn.Linear(128, action_space.n)
@@ -39,8 +46,9 @@ class SimplePolicy(Policy):
 
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        x = obs.view(obs.size(0), -1)
-        x = self.obs_encoder(x)
+        if obs.dim() == 3:
+            obs = obs.unsqueeze(0)
+        x = self.obs_encoder(obs)
         x = F.relu(self.fc1(x))
 
         logits = self.action_head(x)
@@ -53,11 +61,11 @@ class SimplePolicy(Policy):
 
 if __name__ == "__main__":
     import gymnasium as gym
-
-    obs_space = gym.spaces.Box(0, 1, shape=(10, 10, 3))
+    
+    obs_space = gym.spaces.Box(0, 1, shape=(3, 30, 20))
     action_space = gym.spaces.Discrete(6)
     policy = SimplePolicy(obs_space, action_space)
-    obs = torch.randn(1, 10, 10, 3)
+    obs = torch.randn(1, *obs_space.shape)
     logits, value = policy(obs)
     print(logits)
     print(value)
