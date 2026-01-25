@@ -6,6 +6,7 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
 - `AgentSpec` — creates the agent
 - `ENVSpec` — creates the env
 - `PolicySpec` — creates a policy
+- `Simulator` - Upper level class to run/train the simulation 
 
 ## Agent
 1. Agent plays/takes action in the simulation.
@@ -36,3 +37,4 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
    ```bash
    pre-commit run --all-files
    ```
+
