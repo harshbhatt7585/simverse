@@ -21,6 +21,10 @@ class PPOTrainer(Trainer):
         env,
         agents: List[SimAgent],
         optimizer: torch.optim.Optimizer,
+        *,
+        episodes: int = 1,
+        training_epochs: int = 4,
+        clip_epsilon: float = 0.2,
     ):
         super().__init__()
         self.env = env
@@ -28,6 +32,9 @@ class PPOTrainer(Trainer):
 
         self.optimizer = optimizer
         self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE)
+        self.episodes = episodes
+        self.training_epochs = training_epochs
+        self.clip_epsilon = clip_epsilon
 
 
     
@@ -50,7 +57,7 @@ class PPOTrainer(Trainer):
                     agent.policy.eval()
                     with torch.no_grad():
                         logits, value = agent.policy(obs) # this will call the neural net (policy) to compute the logits and value
-                        dist = torch.distributions.Categorical(logits)
+                        dist = torch.distributions.Categorical(logits=logits)
                         action = dist.sample()
                         log_prob = dist.log_prob(action)
                         obs, reward, done, info = self.env.step(action)
@@ -72,31 +79,34 @@ class PPOTrainer(Trainer):
             for agent in self.agents:
                 agent.policy.train()
 
-                # sample the data from buffer
-                batch = self.replay_buffer.sample(self.BATCH_SIZE)
+                for epoch in range(self.training_epochs):
+                    minibatch = self.replay_buffer.sample(self.BATCH_SIZE)
+                    if not minibatch:
+                        break
 
-                (_obs, _action, _log_prob, _value, reward, _, _info) = batch
+                    for experience in minibatch:
+                        _obs = experience.observation
+                        _action = experience.action
+                        _log_prob = experience.log_prob
+                        reward = experience.reward
 
-                # get the action logits and value
-                logits, value = agent.policy(obs)
-                dist = torch.distributions.Categorical(logits)
-                action = dist.sample()
-                log_prob = dist.log_prob(action)
+                        logits, value = agent.policy(_obs)
+                        dist = torch.distributions.Categorical(logits=logits)
+                        log_prob = dist.log_prob(_action)
 
+                        advantage = self.compute_gae(reward, value)
 
+                        ratio = torch.exp(log_prob - _log_prob)
+                        surr = ratio * advantage
+                        surr_clipped = (
+                            torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                            * advantage
+                        )
+                        ppo_loss = -torch.min(surr, surr_clipped).mean()
 
-                # compute the loss
-                advantage = self.compute_gae(reward, value)
-
-                ratio = torch.exp(log_prob - _log_prob)
-                surr = ratio * advantage
-                surr_clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantage
-                ppo_loss = -torch.min(surr, surr_clipped).mean()
-
-                self.optimizer.zero_grad()
-
-                ppo_loss.backward()
-                self.optimizer.step()
+                        self.optimizer.zero_grad()
+                        ppo_loss.backward()
+                        self.optimizer.step()
 
 
 
@@ -109,8 +119,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
-
 
 
 
