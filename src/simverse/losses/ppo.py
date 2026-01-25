@@ -65,11 +65,17 @@ class PPOTrainer(Trainer):
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
-                        logits, value = agent.policy(obs) # this will call the neural net (policy) to compute the logits and value
+                        # Extract observation tensor from dict and convert to torch
+                        obs_tensor = torch.from_numpy(obs["obs"]).float().unsqueeze(0)
+                        logits, value = agent.policy(obs_tensor)
                         dist = torch.distributions.Categorical(logits=logits)
                         action = dist.sample()
                         log_prob = dist.log_prob(action)
-                        obs, reward, done, info = self.env.step(action)
+                        # Convert action to int for env.step
+                        action_int = action.item()
+                        obs, reward, done, info = self.env.step({agent.agent_id: action_int})
+
+                        print(reward)
 
                         # store the data into buffer
                         self.replay_buffer.add(
@@ -112,6 +118,7 @@ class PPOTrainer(Trainer):
                             * advantage
                         )
                         ppo_loss = -torch.min(surr, surr_clipped).mean()
+                        print(ppo_loss)
 
                         self.optimizer.zero_grad()
                         ppo_loss.backward()
