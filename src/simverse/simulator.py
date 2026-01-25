@@ -39,12 +39,9 @@ class Simulator:
             agents.append(agent)
         return agents
 
-    def run(self, *args, **kwargs) -> None:
+    def train(self, *args, **kwargs) -> None:
         agents = self._build_agents()
         self.loss_trainer.train(self.env, agents, *args, **kwargs)
-
-    # Alias for readability
-    train = run
 
 
 
