@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from simverse.policies.policy import Policy
+from simverse.abstractor.policy import Policy
 
 
 

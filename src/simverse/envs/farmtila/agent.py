@@ -4,10 +4,10 @@ from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
-from simverse.agent.sim_agent import SimAgent
+from simverse.abstractor.agent import SimAgent
 
 if TYPE_CHECKING:
-    from simverse.policies.policy import Policy
+    from simverse.abstractor.policy import Policy
 
 DEFAULT_AGENT_ACTIONS = np.arange(6, dtype=np.int64)
 

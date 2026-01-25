@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from typing import Optional
-from simverse.policies.policy import Policy
+from simverse.abstractor.policy import Policy
 
 class SimAgent(ABC):
     @abstractmethod

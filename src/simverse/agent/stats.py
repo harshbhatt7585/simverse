@@ -1,7 +1,7 @@
 "Abstraction for agent stats"
 
 from abc import ABC, abstractmethod
-from simverse.agent.sim_agent import SimAgent
+from simverse.abstractor.agent import SimAgent
 
 class AgentStats(ABC):
     @abstractmethod
