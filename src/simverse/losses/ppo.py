@@ -60,7 +60,7 @@ class PPOTrainer(Trainer):
                 agent.policy.train()
 
                 # sample the data from buffer
-                batch = sample_batch(buffer)
+                batch = self.replay_buffer.sample(self.BATCH_SIZE)
 
                 (_obs, _action, reward, _, _info) = batch
 
