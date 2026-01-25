@@ -34,40 +34,39 @@ class PPOTrainer(Trainer):
     def train(
         self
     ):
+        for _ in range(self.episodes):
 
-        self.env.reset()
-        for i in range(self.env.config.max_steps):
+            self.env.reset()
+            for i in range(self.env.config.max_steps):
 
-            # observation of all the agents
-            obs = self.env.get_observation()
+                # observation of all the agents
+                obs = self.env.get_observation()
 
 
-            ## INFERENCE PHASE (DATA COLLECTION)
+                ## INFERENCE PHASE (DATA COLLECTION)
 
-            # each agent has their own policy to take action
-            for agent in self.agents:
-                agent.policy.eval()
-                with torch.no_grad():
-                    logits, value = agent.policy(obs) # this will call the neural net (policy) to compute the logits and value
-                    dist = torch.distributions.Categorical(logits)
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action)
-                    obs, reward, done, info = self.env.step(action)
+                # each agent has their own policy to take action
+                for agent in self.agents:
+                    agent.policy.eval()
+                    with torch.no_grad():
+                        logits, value = agent.policy(obs) # this will call the neural net (policy) to compute the logits and value
+                        dist = torch.distributions.Categorical(logits)
+                        action = dist.sample()
+                        log_prob = dist.log_prob(action)
+                        obs, reward, done, info = self.env.step(action)
 
-                    # store the data into buffer
-                    self.replay_buffer.add(
-                        Experience(
-                            observation=obs,
-                            action=action,
-                            log_prob=log_prob,
-                            value=value,
-                            reward=reward,
-                            done=done,
-                            info=info
-                    ))
-                
-                # update the agent's memory
-            
+                        # store the data into buffer
+                        self.replay_buffer.add(
+                            Experience(
+                                observation=obs,
+                                action=action,
+                                log_prob=log_prob,
+                                value=value,
+                                reward=reward,
+                                done=done,
+                                info=info
+                        ))
+                    
 
             # TRAINING PHASE (MODEL UPDATE)
             for agent in self.agents:
