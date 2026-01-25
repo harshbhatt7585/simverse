@@ -36,6 +36,16 @@ class PPOTrainer(Trainer):
         self.training_epochs = training_epochs
         self.clip_epsilon = clip_epsilon
 
+    
+    def compute_gae(self, rewards, values, next_values, dones):
+        gae = 0.0
+        advantages = []
+        for step in reversed(range(len(rewards))):
+            delta = rewards[step] + self.gamma * next_values[step] * (1 - dones[step]) - values[step]
+            gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
+            advantages.insert(0, gae)
+        return advantages
+
 
     
     def train(
@@ -119,7 +129,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
 
 
 
