@@ -55,6 +55,18 @@ class Simulator:
     def load_checkpoint(self, checkpoint_path: str) -> None:
         self.checkpointer.load(checkpoint_path)
 
+    
+    # TODO: it does not work, fix this.
+    def run(self, checkpoint_path: str | None = None, render: bool = False) -> None:
+        agents = self._build_agents()
+        if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
+            self.env.assign_agents(agents)
+        elif hasattr(self.env, "agents"):
+            self.env.agents = agents
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
+        self.env.render()
+
 
 
 
