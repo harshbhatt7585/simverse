@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from simverse.utils.replay_buffer import Experience
+import numpy as np
 
 try:
     import wandb  # type: ignore
@@ -49,15 +50,16 @@ class TrainingStats:
             return
         payload = {}
         payload["trainer/steps"] = self.steps
-        
-        if self.experiences:
-            last = self.experiences[-1]
-            payload["experience/done"] = last.done
+    
             
         if self.episode_rewards:
             payload["experience/reward"] = self.episode_rewards[-1]
             payload["experience/cumulative_reward"] = sum(self.episode_rewards)
             payload["experience/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
+        
+        if self.experiences:
+            last = self.experiences[-1]
+            payload["experience/done"] = np.float32(last.done).item()
             
         if self.policy_losses:
             payload["loss/policy"] = self.policy_losses[-1]
