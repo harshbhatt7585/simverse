@@ -106,12 +106,15 @@ class PPOTrainer(Trainer):
                         _action = experience.action
                         _log_prob = experience.log_prob
                         reward = experience.reward
+                        _value = experience.value
+                        _done = experience.done
 
-                        logits, value = agent.policy(_obs)
+                        logits, next_value = agent.policy(_obs)
                         dist = torch.distributions.Categorical(logits=logits)
                         log_prob = dist.log_prob(_action)
 
-                        advantage = self.compute_gae(reward, value)
+
+                        advantage = self.compute_gae(reward, _value, next_value, _done)
 
                         ratio = torch.exp(log_prob - _log_prob)
                         surr = ratio * advantage
