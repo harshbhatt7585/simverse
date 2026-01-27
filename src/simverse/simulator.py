@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.policy import Policy
@@ -9,6 +9,8 @@ from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.trainer import Trainer
 
 from simverse.utils.checkpointer import Checkpointer
+import torch
+from torch.distributions import Categorical
 
 AgentFactory = Callable[[int, Policy, SimEnv], SimAgent]
 
@@ -56,16 +58,42 @@ class Simulator:
         self.checkpointer.load(checkpoint_path)
 
     
-    # TODO: it does not work, fix this.
-    def run(self, checkpoint_path: str | None = None, render: bool = False) -> None:
+    def run(
+        self,
+        checkpoint_path: Optional[str] = None,
+        max_steps: Optional[int] = None,
+        render: bool = True,
+    ) -> None:
         agents = self._build_agents()
         if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
             self.env.assign_agents(agents)
         elif hasattr(self.env, "agents"):
             self.env.agents = agents
+
         if checkpoint_path:
             self.load_checkpoint(checkpoint_path)
-        self.env.render()
+
+        obs = self.env.reset()
+        max_steps = max_steps or getattr(getattr(self.env, "config", None), "max_steps", None)
+        done = False
+        step = 0
+
+        while not done and (max_steps is None or step < max_steps):
+            actions = {}
+            for agent in agents:
+                if agent.policy is None:
+                    continue
+                agent.policy.eval()
+                with torch.no_grad():
+                    obs_tensor = torch.from_numpy(obs["obs"]).float().unsqueeze(0)
+                    logits, _ = agent.policy(obs_tensor)
+                    action = Categorical(logits=logits).sample().item()
+                actions[agent.agent_id] = action
+
+            obs, reward, done, info = self.env.step(actions)
+            if render:
+                self.env.render()
+            step += 1
 
 
 
