@@ -1,22 +1,33 @@
-"Abstraction for agent stats"
+from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from simverse.abstractor.agent import SimAgent
+from dataclasses import dataclass, field
+from statistics import mean
+from typing import Dict, List, Optional
+from simverse.utils.replay_buffer import Episode, Experience
 
-class AgentStats(ABC):
-    @abstractmethod
-    def __init__(self, agent: SimAgent):
-        self.agent = agent
-        self.stats = {}
+try:
+    import wandb  # type: ignore
+    _WANDB_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    wandb = None
+    _WANDB_AVAILABLE = False
 
-    @abstractmethod
-    def reset(self) -> None:
-        pass
 
-    @abstractmethod
-    def update(self) -> None:
-        pass
+@dataclass
+class TrainingStats:
+    experiences: List[Experience]
+    steps: int = 0
 
-    @abstractmethod
-    def get_stats(self) -> dict:
-        pass
+
+    def push_experience(self, experience: Experience) -> None:
+        self.experiences.append(experience)
+    
+
+    def step(self) -> None:
+        self.steps += 1
+
+
+    def log_wandb(self, step: Optional[int] = None) -> None:
+        if not _WANDB_AVAILABLE:
+            return
+        wandb.log(self.experiences, step=step)
