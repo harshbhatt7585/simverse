@@ -73,10 +73,23 @@ class FarmtilaRender:
         width: int,
         height: int,
         cell_size: int = 32, 
-        fps: int = 30
+        fps: int = 30,
+        external_control: bool = False,
     ):
+        """
+        Initialize the Farmtila renderer.
+        
+        Args:
+            width: Grid width in cells
+            height: Grid height in cells
+            cell_size: Pixel size of each cell
+            fps: Target frames per second
+            external_control: If True, renderer only draws - doesn't step env or reset.
+                              Use this when Simulator controls the episode flow.
+        """
         self.width = width
         self.height = height
+        self.external_control = external_control
         pygame.init()
         self.cell_size = cell_size
         self.fps = fps
@@ -464,22 +477,30 @@ class FarmtilaRender:
         self.env = env
         self.frame_count += 1
         
-        # Handle episode end and reset
-        if self.showing_winner:
-            self.winner_display_frames += 1
-            if self.winner_display_frames >= self.winner_display_duration:
-                # Reset the episode
-                self.showing_winner = False
+        # Handle episode end and reset (only when NOT in external control mode)
+        if not self.external_control:
+            if self.showing_winner:
+                self.winner_display_frames += 1
+                if self.winner_display_frames >= self.winner_display_duration:
+                    # Reset the episode
+                    self.showing_winner = False
+                    self.winner_display_frames = 0
+                    self.episodes_completed += 1
+                    env.reset()
+            elif self.running_random and not env.done:
+                actions = self._seed_harvest_actions(env)
+                _obs, _rewards, _done, _info = env.step(actions)
+            elif env.done and not self.showing_winner:
+                # Episode just ended, start showing winner
+                self.showing_winner = True
                 self.winner_display_frames = 0
-                self.episodes_completed += 1
-                env.reset()
-        elif self.running_random and not env.done:
-            actions = self._seed_harvest_actions(env)
-            _obs, _rewards, _done, _info = env.step(actions)
-        elif env.done and not self.showing_winner:
-            # Episode just ended, start showing winner
-            self.showing_winner = True
-            self.winner_display_frames = 0
+        else:
+            # External control mode: just track winner display state for overlay
+            if env.done and not self.showing_winner:
+                self.showing_winner = True
+                self.winner_display_frames = 0
+            elif self.showing_winner:
+                self.winner_display_frames += 1
         
         # Draw grass background
         self.screen.blit(self.grass_surface, (0, 0))
