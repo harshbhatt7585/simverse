@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Any, Protocol
 
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.policy import Policy
@@ -13,6 +13,13 @@ import torch
 from torch.distributions import Categorical
 
 AgentFactory = Callable[[int, Policy, SimEnv], SimAgent]
+
+
+class Renderer(Protocol):
+    """Protocol for environment renderers."""
+    def draw(self, env: SimEnv) -> None: ...
+    def handle_events(self) -> None: ...
+    def close(self) -> None: ...
 
 
 class Simulator:
@@ -62,8 +69,16 @@ class Simulator:
         self,
         checkpoint_path: Optional[str] = None,
         max_steps: Optional[int] = None,
-        render: bool = True,
+        renderer: Optional[Renderer] = None,
     ) -> None:
+        """
+        Run inference with trained policies.
+        
+        Args:
+            checkpoint_path: Path to load model checkpoint from
+            max_steps: Maximum steps to run (defaults to env.config.max_steps)
+            renderer: Optional renderer instance for visualization
+        """
         agents = self._build_agents()
         if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
             self.env.assign_agents(agents)
@@ -78,22 +93,35 @@ class Simulator:
         done = False
         step = 0
 
-        while not done and (max_steps is None or step < max_steps):
-            actions = {}
-            for agent in agents:
-                if agent.policy is None:
-                    continue
-                agent.policy.eval()
-                with torch.no_grad():
-                    obs_tensor = torch.from_numpy(obs["obs"]).float().unsqueeze(0)
-                    logits, _ = agent.policy(obs_tensor)
-                    action = Categorical(logits=logits).sample().item()
-                actions[agent.agent_id] = action
+        try:
+            while not done and (max_steps is None or step < max_steps):
+                # Handle renderer events (quit, keyboard, etc.)
+                if renderer:
+                    renderer.handle_events()
+                
+                # Collect actions from all agents
+                actions = {}
+                for agent in agents:
+                    if agent.policy is None:
+                        continue
+                    agent.policy.eval()
+                    with torch.no_grad():
+                        obs_tensor = torch.from_numpy(obs["obs"]).float().unsqueeze(0)
+                        logits, _ = agent.policy(obs_tensor)
+                        action = Categorical(logits=logits).sample().item()
+                    actions[agent.agent_id] = action
 
-            obs, reward, done, info = self.env.step(actions)
-            if render:
-                self.env.render()
-            step += 1
+                obs, reward, done, info = self.env.step(actions)
+                
+                # Render the environment
+                if renderer:
+                    renderer.draw(self.env)
+                
+                step += 1
+        finally:
+            # Clean up renderer
+            if renderer:
+                renderer.close()
 
 
 
