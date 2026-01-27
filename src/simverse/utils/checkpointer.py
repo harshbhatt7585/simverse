@@ -1,26 +1,3 @@
-f"""
-Each agent has their own policy,
-To save the checkpoint of one training run on an ENV, we need to save all the policies of all the agents.
-we can save like this:
-
-farmtila_state_dict = {{
-    agent_id -> policy_state_dict
-}}
-
-
-and load like this:
-
-checkpointer.load(farmtila_state_dict_path)
-
-
-def load_farmtila_state_dict(farmtila_state_dict_path: str) -> dict:
-    with open(farmtila_state_dict_path, "rb") as f:
-        farmtila_state_dict = pickle.load(f)
-        for agent in agents:
-            agent.policy.load_state_dict(farmtila_state_dict[agent.agent_id])
-
-"""
-
 import pickle
 from simverse.abstractor.simenv import SimEnv
 
