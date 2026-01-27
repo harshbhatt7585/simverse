@@ -36,20 +36,42 @@ class PPOTrainer(Trainer):
         self.gae_lambda = gae_lambda
 
     
+    # TODO: Looking suspicious, need to check if this is correct
     def compute_gae(
         self,
         rewards: List[float],
         values: List[float],
         next_value: float,
-        done: bool,
-    ):
+        dones: List[bool],
+    ) -> torch.Tensor:
+        """
+        Compute Generalized Advantage Estimation for a trajectory.
+        
+        Args:
+            rewards: List of rewards for each step
+            values: List of value estimates for each step  
+            next_value: Value estimate for the final next state (bootstrap)
+            dones: List of done flags for each step
+        
+        Returns:
+            Tensor of advantages for each step
+        """
         gae = 0.0
         advantages = []
-        for step in reversed(range(len(rewards))):
-            delta = rewards[step] + self.gamma * next_values[step] * (1 - dones[step]) - values[step]
-            gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
+        n_steps = len(rewards)
+        
+        for step in reversed(range(n_steps)):
+            if step == n_steps - 1:
+                next_val = next_value
+            else:
+                next_val = values[step + 1]
+            
+            done_mask = 1.0 - float(dones[step])
+            delta = rewards[step] + self.gamma * next_val * done_mask - values[step]
+            gae = delta + self.gamma * self.gae_lambda * done_mask * gae
             advantages.insert(0, gae)
-        return advantages
+        
+        return torch.tensor(advantages, dtype=torch.float32)
 
 
     
@@ -104,41 +126,56 @@ class PPOTrainer(Trainer):
                 agent.policy.train()
 
                 for epoch in range(self.training_epochs):
-                    minibatch = self.replay_buffer.sample(self.BATCH_SIZE)
-                    print("minibatch: ", minibatch)
-                    if not minibatch:
+                    # Sample a batch of experiences (trajectory)
+                    trajectory = self.replay_buffer.sample(self.BATCH_SIZE)
+                    if not trajectory:
                         break
-                
                     
-
-                    for experience in minibatch:
-                        _obs = experience.observation
-                        _action = experience.action
-                        _log_prob = experience.log_prob
-                        reward = experience.reward
-                        _value = experience.value
-                        _done = experience.done
-
-                        logits, next_value = agent.policy(_obs)
+                    # Extract trajectory data as lists
+                    observations = [exp.observation for exp in trajectory]
+                    actions = [exp.action for exp in trajectory]
+                    old_log_probs = [exp.log_prob for exp in trajectory]
+                    rewards = [sum(exp.reward.values()) if isinstance(exp.reward, dict) else exp.reward for exp in trajectory]
+                    values = [exp.value.squeeze().item() for exp in trajectory]
+                    dones = [exp.done if isinstance(exp.done, bool) else bool(exp.done) for exp in trajectory]
+                    
+                    # Get next value for bootstrap (from last observation)
+                    with torch.no_grad():
+                        _, next_value = agent.policy(observations[-1])
+                        next_value = next_value.squeeze().item()
+                    
+                    # Compute advantages for the trajectory
+                    advantages = self.compute_gae(rewards, values, next_value, dones)
+                    
+                    # Compute returns (advantages + values)
+                    returns = advantages + torch.tensor(values, dtype=torch.float32)
+                    
+                    # PPO update for each step in trajectory
+                    for i, exp in enumerate(trajectory):
+                        logits, value = agent.policy(exp.observation)
                         dist = torch.distributions.Categorical(logits=logits)
-                        log_prob = dist.log_prob(_action)
-
-
-                        advantage = self.compute_gae(reward, _value, next_value, _done)
-
-                        ratio = torch.exp(log_prob - _log_prob)
-                        surr = ratio * advantage
-                        surr_clipped = (
-                            torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
-                            * advantage
-                        )
-                        ppo_loss = -torch.min(surr, surr_clipped).mean()
-                        print(ppo_loss)
-                        print(ppo_loss)
-
+                        log_prob = dist.log_prob(exp.action)
+                        
+                        # Ratio for PPO
+                        ratio = torch.exp(log_prob - exp.log_prob)
+                        
+                        # Clipped surrogate objective
+                        adv = advantages[i]
+                        surr1 = ratio * adv
+                        surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * adv
+                        policy_loss = -torch.min(surr1, surr2).mean()
+                        
+                        # Value loss
+                        value_loss = 0.5 * (returns[i] - value.squeeze()).pow(2).mean()
+                        
+                        # Total loss
+                        loss = policy_loss + 0.5 * value_loss
+                        
                         self.optimizer.zero_grad()
-                        ppo_loss.backward()
+                        loss.backward()
                         self.optimizer.step()
+                    
+                    print(f"Epoch {epoch}: policy_loss={policy_loss.item():.4f}, value_loss={value_loss.item():.4f}")
 
 
 
