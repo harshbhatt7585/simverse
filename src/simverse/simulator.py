@@ -8,6 +8,7 @@ from simverse.abstractor.policy import Policy
 from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.trainer import Trainer
 
+from simverse.utils.checkpointer import Checkpointer
 
 AgentFactory = Callable[[int, Policy, SimEnv], SimAgent]
 
@@ -31,6 +32,9 @@ class Simulator:
         self.loss_trainer = loss_trainer
         self.agent_factory = agent_factory
 
+
+        self.checkpointer = Checkpointer(self.env)
+
     def _build_agents(self) -> List[SimAgent]:
         agents: List[SimAgent] = []
         for idx in range(self.num_agents):
@@ -42,6 +46,11 @@ class Simulator:
     def train(self, *args, **kwargs) -> None:
         agents = self._build_agents()
         self.loss_trainer.train(self.env, agents, *args, **kwargs)
+    
+
+    def load_checkpoint(self, checkpoint_path: str) -> None:
+        self.checkpointer.load(checkpoint_path)
+
 
 
 
