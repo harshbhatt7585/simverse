@@ -3,6 +3,7 @@ from collections import deque
 import random
 from typing import Dict, List
 
+
 @dataclass
 class Experience:
     observation: Dict 
@@ -12,6 +13,18 @@ class Experience:
     reward: List[float]
     done: List[bool]
     info: List[Dict]
+
+
+@dataclass
+class Episode:
+    experiences: List[Experience]
+
+
+@dataclass
+class Trajectory:
+    episodes: List[Episode]
+
+
 
 
 class ReplayBuffer:
