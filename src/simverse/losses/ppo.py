@@ -36,7 +36,13 @@ class PPOTrainer(Trainer):
         self.gae_lambda = gae_lambda
 
     
-    def compute_gae(self, rewards, values, next_values, dones):
+    def compute_gae(
+        self,
+        rewards: List[float],
+        values: List[float],
+        next_value: float,
+        done: bool,
+    ):
         gae = 0.0
         advantages = []
         for step in reversed(range(len(rewards))):
