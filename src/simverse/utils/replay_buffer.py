@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from typing import Dict, List
-import deque
+from collections import deque
 import random
+from typing import Dict, List
 
 @dataclass
 class Experience:
