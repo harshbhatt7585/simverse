@@ -22,6 +22,8 @@ class PPOTrainer(Trainer):
         episodes: int = 1,
         training_epochs: int = 4,
         clip_epsilon: float = 0.2,
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
     ):
         super().__init__()
 
@@ -30,6 +32,8 @@ class PPOTrainer(Trainer):
         self.episodes = episodes
         self.training_epochs = training_epochs
         self.clip_epsilon = clip_epsilon
+        self.gamma = gamma
+        self.gae_lambda = gae_lambda
 
     
     def compute_gae(self, rewards, values, next_values, dones):
