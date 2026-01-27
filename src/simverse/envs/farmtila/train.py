@@ -16,9 +16,17 @@ from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.config.policy import PolicySpec
 from simverse.policies.simple import SimplePolicy
 from simverse.losses.ppo import PPOTrainer
+from simverse.agent.stats import TrainingStats
 import torch
 from simverse.abstractor.policy import Policy
 from simverse.envs.farmtila.agent import FarmtilaAgent
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    wandb = None
+    WANDB_AVAILABLE = False
 
 
 def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
@@ -31,12 +39,28 @@ def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAg
 
 
 def train():
+    # Initialize wandb for logging
+    if WANDB_AVAILABLE:
+        wandb.init(
+            project="simverse-farmtila",
+            name="ppo-training",
+            config={
+                "width": 30,
+                "height": 20,
+                "num_agents": 4,
+                "max_steps": 100,
+                "episodes": 100,
+                "training_epochs": 10,
+                "lr": 0.001,
+            }
+        )
+    
     config = FarmtilaConfig(
         width=30,
         height=20,
         num_agents=4,
         total_seeds_per_episode=500,
-        max_steps=10000,
+        max_steps=100,
         spawn_seed_every=100,
         seeds_per_spawn=10,
         policies=[],
@@ -52,12 +76,16 @@ def train():
     env.config.policies = [policy_spec]
     
     policy_models = [ps.model for ps in env.config.policies]
+    
+    # Create stats tracker
+    stats = TrainingStats()
 
     loss_trainer = PPOTrainer(
         optimizer=torch.optim.Adam(policy_spec.model.parameters(), lr=0.001),
         episodes=100,
         training_epochs=10,
         clip_epsilon=0.2,
+        stats=stats,
     )
     simulator = Simulator(
         env=env,
@@ -69,6 +97,10 @@ def train():
 
     # starts the training
     simulator.train()
+    
+    # Finish wandb run
+    if WANDB_AVAILABLE:
+        wandb.finish()
 
 
 

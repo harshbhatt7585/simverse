@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 from simverse.abstractor.trainer import Trainer
 from simverse.abstractor.agent import SimAgent
-from typing import List
+from typing import List, Optional
 import torch.nn.functional as F
 from simverse.utils.replay_buffer import ReplayBuffer
 from simverse.utils.replay_buffer import Experience
 from simverse.abstractor.simenv import SimEnv
+from simverse.agent.stats import TrainingStats
 
 
 class PPOTrainer(Trainer):
@@ -24,6 +25,7 @@ class PPOTrainer(Trainer):
         clip_epsilon: float = 0.2,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
+        stats: Optional[TrainingStats] = None,
     ):
         super().__init__()
 
@@ -34,6 +36,7 @@ class PPOTrainer(Trainer):
         self.clip_epsilon = clip_epsilon
         self.gamma = gamma
         self.gae_lambda = gae_lambda
+        self.stats = stats if stats is not None else TrainingStats()
 
     
     # TODO: Looking suspicious, need to check if this is correct
@@ -108,16 +111,20 @@ class PPOTrainer(Trainer):
                         obs, reward, done, info = self.env.step({agent.agent_id: action_int})
 
                         # store the data into buffer
-                        self.replay_buffer.add(
-                            Experience(
-                                observation=obs_tensor,
-                                action=action,
-                                log_prob=log_prob,
-                                value=value,
-                                reward=reward,
-                                done=done,
-                                info=info
-                        ))
+                        experience = Experience(
+                            observation=obs_tensor,
+                            action=action,
+                            log_prob=log_prob,
+                            value=value,
+                            reward=reward,
+                            done=done,
+                            info=info
+                        )
+                        self.replay_buffer.add(experience)
+                        
+                        # Track stats
+                        self.stats.push_experience(experience)
+                        self.stats.step()
                     
             
 
@@ -176,6 +183,10 @@ class PPOTrainer(Trainer):
                         self.optimizer.step()
                     
                     print(f"Epoch {epoch}: policy_loss={policy_loss.item():.4f}, value_loss={value_loss.item():.4f}")
+                    
+                    # Track and log losses
+                    self.stats.push_losses(policy_loss.item(), value_loss.item())
+                    self.stats.log_wandb(step=self.stats.steps)
 
 
 
