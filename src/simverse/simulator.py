@@ -45,6 +45,10 @@ class Simulator:
 
     def train(self, *args, **kwargs) -> None:
         agents = self._build_agents()
+        if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
+            self.env.assign_agents(agents)
+        elif hasattr(self.env, "agents"):
+            self.env.agents = agents
         self.loss_trainer.train(self.env, agents, *args, **kwargs)
     
 

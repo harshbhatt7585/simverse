@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 class PPOTrainer(Trainer):
 
     BUFFER_SIZE = 10000
-    BATCH_SIZE = 32
+    BATCH_SIZE = 1
 
     def __init__(
         self,
@@ -273,6 +273,8 @@ class PPOTrainer(Trainer):
             
             # Track episode reward
             self.stats.push_reward(episode_reward)
+
+            self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
         
         # Final summary
         training_logger.finish({

@@ -50,7 +50,10 @@ class FarmtilaEnv(SimEnv):
         self.seed_grid.fill(0)
         self.owner_grid.fill(-1)
         self.farm_grid.fill(0)
-        self.agents = self._spawn_agents()
+        if not self.agents:
+            self.agents = self._spawn_agents()
+        else:
+            self._reset_agent_positions()
         self.steps = 0
         self.last_pickups.clear()
         self.seeds_spawned = 0
@@ -100,16 +103,12 @@ class FarmtilaEnv(SimEnv):
         """Public method required by SimEnv abstract class."""
         return self._get_observation()
 
+    def assign_agents(self, agents: List[FarmtilaAgent]) -> None:
+        self.agents = agents
+
     def _spawn_agents(self) -> List[FarmtilaAgent]:
         agents: List[FarmtilaAgent] = []
-        occupied = set()
-        for agent_id in range(self.config.num_agents):
-            while True:
-                x = int(self.rng.integers(0, self.config.width))
-                y = int(self.rng.integers(0, self.config.height))
-                if (x, y) not in occupied:
-                    occupied.add((x, y))
-                    break
+        for agent_id, (x, y) in enumerate(self._sample_unique_positions(self.config.num_agents)):
             agents.append(
                 FarmtilaAgent(
                     agent_id=agent_id,
@@ -118,6 +117,23 @@ class FarmtilaEnv(SimEnv):
                 )
             )
         return agents
+
+    def _reset_agent_positions(self) -> None:
+        for agent, (x, y) in zip(self.agents, self._sample_unique_positions(len(self.agents))):
+            agent.position = (x, y)
+
+    def _sample_unique_positions(self, count: int) -> List[Tuple[int, int]]:
+        occupied = set()
+        positions: List[Tuple[int, int]] = []
+        for _ in range(count):
+            while True:
+                x = int(self.rng.integers(0, self.config.width))
+                y = int(self.rng.integers(0, self.config.height))
+                if (x, y) not in occupied:
+                    occupied.add((x, y))
+                    positions.append((x, y))
+                    break
+        return positions
 
     def _get_observation(self):
         # Build agent position grid: 0 = no agent, agent_id + 1 = agent present

@@ -1,3 +1,4 @@
+import os
 import pickle
 from simverse.abstractor.simenv import SimEnv
 
@@ -7,6 +8,9 @@ class Checkpointer:
 
     def save(self,  state_dict_path: str) -> None:
         agents = self.env.agents
+        directory = os.path.dirname(state_dict_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         farmtila_state_dict = {
             "env_config": self.env.config,
             "agents": [
