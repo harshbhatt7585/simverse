@@ -21,10 +21,11 @@ class FarmtilaEnv(SimEnv):
 
     @property
     def observation_space(self):
+        # 4 channels: seed_grid, owner_grid, farm_grid, agent_grid
         return gym.spaces.Box(
             low=-1,
             high=max(self.config.num_agents, 1),
-            shape=(3, self.config.width, self.config.height),
+            shape=(4, self.config.width, self.config.height),
             dtype=np.float32,
         )
 
@@ -119,9 +120,19 @@ class FarmtilaEnv(SimEnv):
         return agents
 
     def _get_observation(self):
+        # Build agent position grid: 0 = no agent, agent_id + 1 = agent present
+        agent_grid = np.zeros((self.config.width, self.config.height), dtype=np.float32)
+        for agent in self.agents:
+            x, y = agent.position
+            agent_grid[x, y] = agent.agent_id + 1  # +1 so 0 means empty
         
-        # [3, width, height]
-        obs = np.stack([self.seed_grid, self.owner_grid, self.farm_grid], axis=0)
+        # [4, width, height]: seed_grid, owner_grid, farm_grid, agent_grid
+        obs = np.stack([
+            self.seed_grid.astype(np.float32), 
+            self.owner_grid.astype(np.float32), 
+            self.farm_grid.astype(np.float32), 
+            agent_grid
+        ], axis=0)
 
         return {
             "obs": obs,
