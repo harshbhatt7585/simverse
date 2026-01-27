@@ -75,12 +75,10 @@ class PPOTrainer(Trainer):
                         action_int = action.item()
                         obs, reward, done, info = self.env.step({agent.agent_id: action_int})
 
-                        print(reward)
-
                         # store the data into buffer
                         self.replay_buffer.add(
                             Experience(
-                                observation=obs,
+                                observation=obs_tensor,
                                 action=action,
                                 log_prob=log_prob,
                                 value=value,
@@ -89,6 +87,7 @@ class PPOTrainer(Trainer):
                                 info=info
                         ))
                     
+            
 
             # TRAINING PHASE (MODEL UPDATE)
             for agent in self.agents:
@@ -96,8 +95,11 @@ class PPOTrainer(Trainer):
 
                 for epoch in range(self.training_epochs):
                     minibatch = self.replay_buffer.sample(self.BATCH_SIZE)
+                    print("minibatch: ", minibatch)
                     if not minibatch:
                         break
+                
+                    
 
                     for experience in minibatch:
                         _obs = experience.observation
@@ -118,6 +120,7 @@ class PPOTrainer(Trainer):
                             * advantage
                         )
                         ppo_loss = -torch.min(surr, surr_clipped).mean()
+                        print(ppo_loss)
                         print(ppo_loss)
 
                         self.optimizer.zero_grad()
