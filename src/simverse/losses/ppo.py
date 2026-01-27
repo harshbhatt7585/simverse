@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 class PPOTrainer(Trainer):
 
     BUFFER_SIZE = 10000
-    BATCH_SIZE = 1
+    BATCH_SIZE = 32
 
     def __init__(
         self,
