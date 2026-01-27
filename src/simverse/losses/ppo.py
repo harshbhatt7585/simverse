@@ -147,6 +147,7 @@ class PPOTrainer(Trainer):
                 ## INFERENCE PHASE (DATA COLLECTION)
 
                 # each agent has their own policy to take action
+                actions = {}
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
@@ -158,30 +159,32 @@ class PPOTrainer(Trainer):
                         log_prob = dist.log_prob(action)
                         # Convert action to int for env.step
                         action_int = action.item()
-                        obs, reward, done, info = self.env.step({agent.agent_id: action_int})
+                        actions[agent.agent_id] = action_int
 
-                        # store the data into buffer
-                        experience = Experience(
-                            observation=obs_tensor,
-                            action=action,
-                            log_prob=log_prob,
-                            value=value,
-                            reward=reward,
-                            done=done,
-                            info=info
-                        )
-                        self.replay_buffer.add(experience)
-                        
-                        # Track stats
-                        self.stats.push_experience(experience)
-                        self.stats.step()
-                        
-                        # Accumulate episode reward
-                        if isinstance(reward, dict):
-                            episode_reward += sum(reward.values())
-                        else:
-                            episode_reward += reward
+                obs, reward, done, info = self.env.step(actions)
+
+                # store the data into buffer
+                experience = Experience(
+                    observation=obs_tensor,
+                    action=action,
+                    log_prob=log_prob,
+                    value=value,
+                    reward=reward,
+                    done=done,
+                    info=info
+                )
+                self.replay_buffer.add(experience)
                 
+                # Track stats
+                self.stats.push_experience(experience)
+                self.stats.step()
+                
+                # Accumulate episode reward
+                if isinstance(reward, dict):
+                    episode_reward += sum(reward.values())
+                else:
+                    episode_reward += reward
+            
                 # Log step progress (every 10 steps to reduce output)
                 if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
                     training_logger.log_step(
