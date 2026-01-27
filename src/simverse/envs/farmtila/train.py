@@ -17,17 +17,9 @@ from simverse.config.policy import PolicySpec
 from simverse.policies.simple import SimplePolicy
 from simverse.losses.ppo import PPOTrainer
 from simverse.agent.stats import TrainingStats
-from simverse.logging_config import training_logger
 import torch
 from simverse.abstractor.policy import Policy
 from simverse.envs.farmtila.agent import FarmtilaAgent
-
-try:
-    import wandb
-    WANDB_AVAILABLE = True
-except ImportError:
-    wandb = None
-    WANDB_AVAILABLE = False
 
 
 def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
@@ -55,21 +47,6 @@ def train():
         "total_seeds": 500,
     }
     
-    # Beautiful header
-    training_logger.header("Farmtila Training")
-    training_logger.config(training_config)
-    
-    # Initialize wandb for logging
-    if WANDB_AVAILABLE:
-        training_logger.info("Weights & Biases logging enabled")
-        wandb.init(
-            project="simverse-farmtila",
-            name="ppo-training",
-            config=training_config
-        )
-    else:
-        training_logger.warning("Weights & Biases not available - install with: pip install wandb")
-    
     config = FarmtilaConfig(
         width=training_config["width"],
         height=training_config["height"],
@@ -95,6 +72,7 @@ def train():
     # Create stats tracker
     stats = TrainingStats()
 
+    # Create trainer with config for logging
     loss_trainer = PPOTrainer(
         optimizer=torch.optim.Adam(policy_spec.model.parameters(), lr=training_config["lr"]),
         episodes=training_config["episodes"],
@@ -103,23 +81,21 @@ def train():
         gamma=training_config["gamma"],
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
+        config=training_config,
+        project_name="simverse-farmtila",
+        run_name="ppo-training",
     )
+    
     simulator = Simulator(
         env=env,
         num_agents=training_config["num_agents"],
-        policies=policy_models,  # Pass the actual models, not PolicySpec
+        policies=policy_models,
         loss_trainer=loss_trainer,
         agent_factory=agent_factory
     )
 
-    # starts the training
-    training_logger.success("Environment and policies initialized")
-    simulator.train()
-    
-    # Finish wandb run
-    if WANDB_AVAILABLE:
-        wandb.finish()
-        training_logger.success("Wandb run finished")
+    # Start training
+    simulator.train(title="Farmtila Training")
 
 
 

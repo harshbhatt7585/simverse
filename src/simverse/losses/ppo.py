@@ -2,13 +2,20 @@ import torch
 import torch.nn as nn
 from simverse.abstractor.trainer import Trainer
 from simverse.abstractor.agent import SimAgent
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import torch.nn.functional as F
 from simverse.utils.replay_buffer import ReplayBuffer
 from simverse.utils.replay_buffer import Experience
 from simverse.abstractor.simenv import SimEnv
 from simverse.agent.stats import TrainingStats
 from simverse.logging_config import get_logger, training_logger
+
+try:
+    import wandb
+    _WANDB_AVAILABLE = True
+except ImportError:
+    wandb = None
+    _WANDB_AVAILABLE = False
 
 logger = get_logger(__name__)
 
@@ -17,8 +24,6 @@ class PPOTrainer(Trainer):
 
     BUFFER_SIZE = 10000
     BATCH_SIZE = 1
-
-
 
     def __init__(
         self,
@@ -29,6 +34,9 @@ class PPOTrainer(Trainer):
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         stats: Optional[TrainingStats] = None,
+        config: Optional[Dict[str, Any]] = None,
+        project_name: str = "simverse",
+        run_name: str = "ppo-training",
     ):
         super().__init__()
 
@@ -40,6 +48,35 @@ class PPOTrainer(Trainer):
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.stats = stats if stats is not None else TrainingStats()
+        self.config = config or {}
+        self.project_name = project_name
+        self.run_name = run_name
+        self._wandb_initialized = False
+    
+    def _init_logging(self, title: str = "Training"):
+        """Initialize beautiful logging and wandb."""
+        # Beautiful header and config display
+        training_logger.header(title)
+        if self.config:
+            training_logger.config(self.config)
+        
+        # Initialize wandb
+        if _WANDB_AVAILABLE:
+            training_logger.info("Weights & Biases logging enabled")
+            wandb.init(
+                project=self.project_name,
+                name=self.run_name,
+                config=self.config
+            )
+            self._wandb_initialized = True
+        else:
+            training_logger.warning("Weights & Biases not available - install with: pip install wandb")
+    
+    def _finish_logging(self):
+        """Finish wandb run."""
+        if self._wandb_initialized and _WANDB_AVAILABLE:
+            wandb.finish()
+            training_logger.success("Wandb run finished")
 
     
     # TODO: Looking suspicious, need to check if this is correct
@@ -85,9 +122,14 @@ class PPOTrainer(Trainer):
         self,
         env: SimEnv,
         agents: List[SimAgent],
+        title: str = "Training",
     ):
         self.env = env
         self.agents = agents
+        
+        # Initialize logging (header, config, wandb)
+        self._init_logging(title)
+        training_logger.success("Environment and policies initialized")
         
         # Start training with beautiful logger
         training_logger.start_training(self.episodes)
@@ -235,6 +277,9 @@ class PPOTrainer(Trainer):
             "final_policy_loss": self.stats.policy_losses[-1] if self.stats.policy_losses else 0.0,
             "final_value_loss": self.stats.value_losses[-1] if self.stats.value_losses else 0.0,
         })
+        
+        # Finish wandb logging
+        self._finish_logging()
 
 
 
