@@ -26,21 +26,28 @@ except ImportError:  # pragma: no cover
 class TrainingStats:
     experiences: List[Experience] = field(default_factory=list)
     steps: int = 0
-    episode_rewards: List[float] = field(default_factory=list)
+    episode_count: int = 0
+    step_rewards: List[float] = field(default_factory=list)  # Per-step rewards
+    episode_rewards: List[float] = field(default_factory=list)  # Total episode rewards
     policy_losses: List[float] = field(default_factory=list)
     value_losses: List[float] = field(default_factory=list)
 
     def push_experience(self, experience: Experience) -> None:
         self.experiences.append(experience)
-        # Track reward
+        # Track per-step reward
         reward = experience.reward
         if isinstance(reward, dict):
             reward = sum(reward.values())
-        self.episode_rewards.append(float(reward) if reward else 0.0)
+        self.step_rewards.append(float(reward) if reward else 0.0)
 
     def push_losses(self, policy_loss: float, value_loss: float) -> None:
         self.policy_losses.append(policy_loss)
         self.value_losses.append(value_loss)
+
+    def push_reward(self, reward: float) -> None:
+        """Push total episode reward."""
+        self.episode_rewards.append(reward)
+        self.episode_count += 1
 
     def step(self) -> None:
         self.steps += 1
@@ -50,28 +57,35 @@ class TrainingStats:
             return
         payload = {}
         payload["trainer/steps"] = self.steps
+        payload["trainer/episodes"] = self.episode_count
     
+        # Step-level rewards
+        if self.step_rewards:
+            payload["step/reward"] = self.step_rewards[-1]
             
+        # Episode-level rewards
         if self.episode_rewards:
-            payload["experience/reward"] = self.episode_rewards[-1]
-            payload["experience/cumulative_reward"] = sum(self.episode_rewards)
-            payload["experience/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
+            payload["episode/reward"] = self.episode_rewards[-1]
+            payload["episode/cumulative_reward"] = sum(self.episode_rewards)
+            payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
         
         if self.experiences:
             last = self.experiences[-1]
-            payload["experience/done"] = np.float32(last.done).item()
+            payload["episode/done"] = np.float32(last.done).item()
             
         if self.policy_losses:
             payload["loss/policy"] = self.policy_losses[-1]
+            payload["loss/policy_avg"] = sum(self.policy_losses) / len(self.policy_losses)
             
         if self.value_losses:
             payload["loss/value"] = self.value_losses[-1]
+            payload["loss/value_avg"] = sum(self.value_losses) / len(self.value_losses)
             
         wandb.log(payload, step=step)
     
     def reset_episode(self) -> None:
         """Reset episode-level stats."""
-        self.episode_rewards.clear()
+        self.step_rewards.clear()
         self.experiences.clear()
 
     

@@ -8,6 +8,9 @@ from simverse.utils.replay_buffer import ReplayBuffer
 from simverse.utils.replay_buffer import Experience
 from simverse.abstractor.simenv import SimEnv
 from simverse.agent.stats import TrainingStats
+from simverse.logging_config import get_logger, training_logger
+
+logger = get_logger(__name__)
 
 
 class PPOTrainer(Trainer):
@@ -85,14 +88,19 @@ class PPOTrainer(Trainer):
     ):
         self.env = env
         self.agents = agents
-        for _ in range(self.episodes):
-
+        
+        # Start training with beautiful logger
+        training_logger.start_training(self.episodes)
+        
+        for episode in range(self.episodes):
+            training_logger.start_episode(episode + 1)
+            
             self.env.reset()
-            for i in range(self.env.config.max_steps):
-
+            episode_reward = 0.0
+            
+            for step in range(self.env.config.max_steps):
                 # observation of all the agents
                 obs = self.env.get_observation()
-
 
                 ## INFERENCE PHASE (DATA COLLECTION)
 
@@ -125,9 +133,24 @@ class PPOTrainer(Trainer):
                         # Track stats
                         self.stats.push_experience(experience)
                         self.stats.step()
-                    
-            
+                        
+                        # Accumulate episode reward
+                        if isinstance(reward, dict):
+                            episode_reward += sum(reward.values())
+                        else:
+                            episode_reward += reward
+                
+                # Log step progress (every 10 steps to reduce output)
+                if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
+                    training_logger.log_step(
+                        step + 1, 
+                        self.env.config.max_steps,
+                        {"reward": episode_reward}
+                    )
 
+            # Clear the step progress line before training logs
+            print()
+            
             # TRAINING PHASE (MODEL UPDATE)
             for agent in self.agents:
                 agent.policy.train()
@@ -182,11 +205,36 @@ class PPOTrainer(Trainer):
                         loss.backward()
                         self.optimizer.step()
                     
-                    print(f"Epoch {epoch}: policy_loss={policy_loss.item():.4f}, value_loss={value_loss.item():.4f}")
+                    # Beautiful epoch logging
+                    training_logger.log_epoch(
+                        epoch, 
+                        self.training_epochs, 
+                        policy_loss.item(), 
+                        value_loss.item()
+                    )
                     
                     # Track and log losses
                     self.stats.push_losses(policy_loss.item(), value_loss.item())
                     self.stats.log_wandb(step=self.stats.steps)
+            
+            # Episode summary
+            avg_reward = episode_reward / max(self.env.config.max_steps, 1)
+            training_logger.end_episode(
+                episode + 1,
+                total_reward=episode_reward,
+                avg_reward=avg_reward,
+                steps=self.env.config.max_steps
+            )
+            
+            # Track episode reward
+            self.stats.push_reward(episode_reward)
+        
+        # Final summary
+        training_logger.finish({
+            "avg_episode_reward": sum(self.stats.episode_rewards) / max(len(self.stats.episode_rewards), 1),
+            "final_policy_loss": self.stats.policy_losses[-1] if self.stats.policy_losses else 0.0,
+            "final_value_loss": self.stats.value_losses[-1] if self.stats.value_losses else 0.0,
+        })
 
 
 
