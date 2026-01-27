@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List
-
+import deque
+import random
 
 @dataclass
 class Experience:
@@ -16,9 +17,10 @@ class Experience:
 class ReplayBuffer:
     def __init__(self, max_size: int = 10000):
         self.max_size = max_size
-    
-    def add(self, experience: tuple) -> None:
-        pass
+        self.buffer = deque(maxlen=max_size)
+        
+    def add(self, experience: Experience) -> None:
+        self.buffer.append(experience)
 
     def sample(self, batch_size: int) -> List[Experience]:
-        pass
+        return random.sample(self.buffer, batch_size)
