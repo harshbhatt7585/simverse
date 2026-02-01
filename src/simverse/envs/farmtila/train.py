@@ -38,8 +38,8 @@ def train():
     training_config = {
         "width": 30,
         "height": 20,
-        "num_agents": 4,
-        "max_steps": 100,
+        "num_agents": 8,
+        "max_steps": 150,
         "episodes": 100,
         "training_epochs": 10,
         "lr": 0.001,
@@ -47,6 +47,9 @@ def train():
         "gamma": 0.99,
         "gae_lambda": 0.95,
         "total_seeds": 500,
+        "batch_size": 512,
+        "buffer_size": 50000,
+        "device": "mps" if torch.backends.mps.is_available() else "cpu",
     }
 
     config = FarmtilaConfig(
@@ -94,6 +97,9 @@ def train():
         project_name="simverse-farmtila",
         run_name="ppo-training",
         episode_save_dir="recordings/farmtila",
+        device=training_config["device"],
+        batch_size=training_config["batch_size"],
+        buffer_size=training_config["buffer_size"],
     )
 
     simulator = Simulator(
