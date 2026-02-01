@@ -195,6 +195,12 @@ class TrainingLogger:
         if metrics:
             parts = []
             for k, v in metrics.items():
+                if k == "steps_per_sec":
+                    label = f"{Colors.BRIGHT_YELLOW}steps/s{Colors.RESET}"
+                    value = f"{Colors.BRIGHT_BLUE}{v:.4f}{Colors.RESET}"
+                    parts.append(f"{label}={value}")
+                    continue
+
                 if "loss" in k.lower():
                     color = Colors.YELLOW
                 elif "reward" in k.lower():
