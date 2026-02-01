@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from simverse.abstractor.agent import SimAgent
@@ -20,8 +20,8 @@ logger = get_logger(__name__)
 
 
 class PPOTrainer(Trainer):
-    BUFFER_SIZE = 10000
-    BATCH_SIZE = 32
+    DEFAULT_BUFFER_SIZE = 10000
+    DEFAULT_BATCH_SIZE = 32
 
     def __init__(
         self,
@@ -37,6 +37,9 @@ class PPOTrainer(Trainer):
         project_name: str = "simverse",
         run_name: str = "ppo-training",
         episode_save_dir: str | None = None,
+        device: Union[torch.device, str] = "cpu",
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        buffer_size: int = DEFAULT_BUFFER_SIZE,
     ):
         super().__init__()
 
@@ -49,7 +52,7 @@ class PPOTrainer(Trainer):
 
         self.optimizer = optimizer
         self.optimizers = optimizers or {}
-        self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE)
+        self.replay_buffer = ReplayBuffer(buffer_size)
         self.episodes = episodes
         self.training_epochs = training_epochs
         self.clip_epsilon = clip_epsilon
@@ -62,6 +65,8 @@ class PPOTrainer(Trainer):
         self._wandb_initialized = False
         self.episode_save_dir = episode_save_dir
         self._env_metadata_cache: Dict[str, Any] | None = None
+        self.device = torch.device(device)
+        self.batch_size = batch_size
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -71,6 +76,12 @@ class PPOTrainer(Trainer):
         if self.optimizer is None:
             raise RuntimeError("No optimizer configured for PPOTrainer")
         return self.optimizer
+
+    def _move_policies_to_device(self) -> None:
+        for agent in getattr(self, "agents", []):
+            policy = getattr(agent, "policy", None)
+            if policy is not None:
+                policy.to(self.device)
 
     def _env_metadata(self) -> Dict[str, Any]:
         if self._env_metadata_cache is not None:
@@ -197,6 +208,7 @@ class PPOTrainer(Trainer):
         self.env = env
         self.agents = agents
         self._env_metadata_cache = None
+        self._move_policies_to_device()
 
         self._init_logging(title)
         training_logger.success("Environment and policies initialized")
@@ -220,8 +232,12 @@ class PPOTrainer(Trainer):
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
-                        # Extract observation tensor from dict and convert to torch
-                        obs_tensor = torch.from_numpy(obs["obs"]).float().unsqueeze(0)
+                        obs_tensor = (
+                            torch.from_numpy(obs["obs"])  # type: ignore[arg-type]
+                            .float()
+                            .unsqueeze(0)
+                            .to(self.device)
+                        )
                         logits, value = agent.policy(obs_tensor)
                         dist = torch.distributions.Categorical(logits=logits)
                         action = dist.sample()
@@ -295,7 +311,7 @@ class PPOTrainer(Trainer):
                 for epoch in range(self.training_epochs):
                     # Sample a batch of experiences (trajectory)
                     trajectory = self.replay_buffer.sample_for_agent(
-                        agent.agent_id, self.BATCH_SIZE
+                        agent.agent_id, self.batch_size
                     )
                     if not trajectory:
                         break
@@ -319,10 +335,14 @@ class PPOTrainer(Trainer):
                         next_value = next_value.squeeze().item()
 
                     # Compute advantages for the trajectory
-                    advantages = self.compute_gae(rewards, values, next_value, dones)
+                    advantages = self.compute_gae(rewards, values, next_value, dones).to(
+                        self.device
+                    )
 
                     # Compute returns (advantages + values)
-                    returns = advantages + torch.tensor(values, dtype=torch.float32)
+                    returns = advantages + torch.tensor(
+                        values, dtype=torch.float32, device=self.device
+                    )
 
                     # PPO update for each step in trajectory
                     for i, exp in enumerate(trajectory):
