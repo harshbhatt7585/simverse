@@ -509,8 +509,11 @@ class FarmtilaRender:
             if env.done and not self.showing_winner:
                 self.showing_winner = True
                 self.winner_display_frames = 0
-            elif self.showing_winner:
+            elif env.done and self.showing_winner:
                 self.winner_display_frames += 1
+            elif not env.done and self.showing_winner:
+                self.showing_winner = False
+                self.winner_display_frames = 0
         
         # Draw grass background
         self.screen.blit(self.grass_surface, (0, 0))
@@ -544,6 +547,7 @@ class FarmtilaRender:
         
         # Draw agent stats panel on the right
         self._draw_agent_stats_panel(env)
+        self._draw_episode_counter()
         
         # Draw winner overlay if episode ended
         if self.showing_winner:
@@ -601,6 +605,8 @@ class FarmtilaRender:
         self.replay_index = 0
         self.replay_playing = False
         self.external_control = True
+        self.showing_winner = False
+        self.winner_display_frames = 0
         if not self.replay_frames:
             raise ValueError("Replay file contains no frames: " + (source_path or "<memory>"))
 
