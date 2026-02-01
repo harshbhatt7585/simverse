@@ -1,3 +1,4 @@
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -217,6 +218,7 @@ class PPOTrainer(Trainer):
         training_logger.success("Environment and policies initialized")
 
         training_logger.start_training(self.episodes)
+        training_start = time.perf_counter()
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
@@ -300,8 +302,16 @@ class PPOTrainer(Trainer):
 
                 # Log step progress (every 10 steps to reduce output)
                 if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
+                    elapsed = max(time.perf_counter() - training_start, 1e-8)
+                    total_steps_done = episode * self.env.config.max_steps + step + 1
+                    steps_per_sec = total_steps_done / elapsed
                     training_logger.log_step(
-                        step + 1, self.env.config.max_steps, {"reward": episode_reward}
+                        step + 1,
+                        self.env.config.max_steps,
+                        {
+                            "reward": episode_reward,
+                            "steps_per_sec": round(steps_per_sec, 2),
+                        },
                     )
 
             # Clear the step progress line before training logs
