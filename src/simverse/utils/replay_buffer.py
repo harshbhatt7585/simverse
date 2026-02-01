@@ -6,6 +6,7 @@ from typing import Dict, List
 
 @dataclass
 class Experience:
+    agent_id: int
     observation: Dict 
     action: List[int]
     log_prob: List[float]
