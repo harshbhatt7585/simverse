@@ -1126,6 +1126,7 @@ if __name__ == "__main__":
                     data = json.loads(replay_file.read_text())
                     renderer.load_replay_data(data, source_path=str(replay_file))
                     renderer.play_replay(loop=False)
+                    renderer.episodes_completed += 1
                 if not args.loop:
                     loop_all = False
         except SystemExit:
