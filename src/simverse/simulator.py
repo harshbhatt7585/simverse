@@ -46,8 +46,15 @@ class Simulator:
 
     def _build_agents(self) -> List[SimAgent]:
         agents: List[SimAgent] = []
+        assign_by_index = len(self.policies) == self.num_agents
+        single_policy = len(self.policies) == 1
         for idx in range(self.num_agents):
-            policy = random.choice(self.policies)
+            if assign_by_index:
+                policy = self.policies[idx]
+            elif single_policy:
+                policy = self.policies[0]
+            else:
+                policy = random.choice(self.policies)
             agent = self.agent_factory(idx, policy, self.env)
             agents.append(agent)
         return agents

@@ -23,11 +23,12 @@ logger = get_logger(__name__)
 class PPOTrainer(Trainer):
 
     BUFFER_SIZE = 10000
-    BATCH_SIZE = 1
+    BATCH_SIZE = 32
 
     def __init__(
         self,
-        optimizer: torch.optim.Optimizer,
+        optimizer: Optional[torch.optim.Optimizer] = None,
+        optimizers: Optional[Dict[int, torch.optim.Optimizer]] = None,
         episodes: int = 1,
         training_epochs: int = 4,
         clip_epsilon: float = 0.2,
@@ -40,7 +41,13 @@ class PPOTrainer(Trainer):
     ):
         super().__init__()
 
+        if optimizer is None and not optimizers:
+            raise ValueError("PPOTrainer requires either a shared optimizer or per-agent optimizers")
+        if optimizer is not None and optimizers:
+            raise ValueError("Provide only one of optimizer or optimizers")
+
         self.optimizer = optimizer
+        self.optimizers = optimizers or {}
         self.replay_buffer = ReplayBuffer(self.BUFFER_SIZE)
         self.episodes = episodes
         self.training_epochs = training_epochs
@@ -52,6 +59,15 @@ class PPOTrainer(Trainer):
         self.project_name = project_name
         self.run_name = run_name
         self._wandb_initialized = False
+
+    def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
+        if self.optimizers:
+            if agent_id not in self.optimizers:
+                raise KeyError(f"Missing optimizer for agent {agent_id}")
+            return self.optimizers[agent_id]
+        if self.optimizer is None:
+            raise RuntimeError("No optimizer configured for PPOTrainer")
+        return self.optimizer
     
     def _init_logging(self, title: str = "Training"):
         """Initialize beautiful logging and wandb."""
@@ -246,9 +262,10 @@ class PPOTrainer(Trainer):
                         # Total loss
                         loss = policy_loss + 0.5 * value_loss
                         
-                        self.optimizer.zero_grad()
+                        optimizer = self._get_optimizer(agent.agent_id)
+                        optimizer.zero_grad()
                         loss.backward()
-                        self.optimizer.step()
+                        optimizer.step()
                     
                     # Beautiful epoch logging
                     training_logger.log_epoch(
@@ -297,7 +314,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
 
 
 

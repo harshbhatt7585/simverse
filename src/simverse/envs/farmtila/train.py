@@ -58,23 +58,30 @@ def train():
         policies=[],
     )
     env = FarmtilaEnv(config=config)
-    policy_spec = PolicySpec(
-        name="simple",
-        model=SimplePolicy(
-            obs_space=env.observation_space,
-            action_space=env.action_space,
-        ),
-    )
-    env.config.policies = [policy_spec]
+    policy_specs = [
+        PolicySpec(
+            name=f"simple_agent_{agent_id}",
+            model=SimplePolicy(
+                obs_space=env.observation_space,
+                action_space=env.action_space,
+            ),
+        )
+        for agent_id in range(training_config["num_agents"])
+    ]
+    env.config.policies = policy_specs
     
     policy_models = [ps.model for ps in env.config.policies]
+    optimizers = {
+        agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=training_config["lr"])
+        for agent_id in range(training_config["num_agents"])
+    }
     
     # Create stats tracker
     stats = TrainingStats()
 
     # Create trainer with config for logging
     loss_trainer = PPOTrainer(
-        optimizer=torch.optim.Adam(policy_spec.model.parameters(), lr=training_config["lr"]),
+        optimizers=optimizers,
         episodes=training_config["episodes"],
         training_epochs=training_config["training_epochs"],
         clip_epsilon=training_config["clip_epsilon"],
