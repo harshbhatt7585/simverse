@@ -49,7 +49,8 @@ def train():
         "total_seeds": 500,
         "batch_size": 512,
         "buffer_size": 50000,
-        "device": "mps" if torch.backends.mps.is_available() else "cpu",
+        "device": "cpu",
+        "dtype": torch.bfloat16,
     }
 
     config = FarmtilaConfig(
@@ -100,6 +101,7 @@ def train():
         device=training_config["device"],
         batch_size=training_config["batch_size"],
         buffer_size=training_config["buffer_size"],
+        dtype=torch.float32,
     )
 
     simulator = Simulator(

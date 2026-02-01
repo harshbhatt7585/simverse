@@ -40,6 +40,7 @@ class PPOTrainer(Trainer):
         device: Union[torch.device, str] = "cpu",
         batch_size: int = DEFAULT_BATCH_SIZE,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
+        dtype: torch.dtype = torch.float32,
     ):
         super().__init__()
 
@@ -67,6 +68,7 @@ class PPOTrainer(Trainer):
         self._env_metadata_cache: Dict[str, Any] | None = None
         self.device = torch.device(device)
         self.batch_size = batch_size
+        self.dtype = dtype
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -234,7 +236,7 @@ class PPOTrainer(Trainer):
                     with torch.no_grad():
                         obs_tensor = (
                             torch.from_numpy(obs["obs"])  # type: ignore[arg-type]
-                            .float()
+                            .to(self.dtype)
                             .unsqueeze(0)
                             .to(self.device)
                         )
@@ -341,7 +343,7 @@ class PPOTrainer(Trainer):
 
                     # Compute returns (advantages + values)
                     returns = advantages + torch.tensor(
-                        values, dtype=torch.float32, device=self.device
+                        values, dtype=self.dtype, device=self.device
                     )
 
                     # PPO update for each step in trajectory
