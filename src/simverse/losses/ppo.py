@@ -164,6 +164,7 @@ class PPOTrainer(Trainer):
 
                 # each agent has their own policy to take action
                 actions = {}
+                collected_step_data = []
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
@@ -176,23 +177,39 @@ class PPOTrainer(Trainer):
                         # Convert action to int for env.step
                         action_int = action.item()
                         actions[agent.agent_id] = action_int
+                        collected_step_data.append(
+                            {
+                                "agent_id": agent.agent_id,
+                                "observation": obs_tensor,
+                                "action": action,
+                                "log_prob": log_prob,
+                                "value": value,
+                            }
+                        )
 
                 obs, reward, done, info = self.env.step(actions)
 
-                # store the data into buffer
-                experience = Experience(
-                    observation=obs_tensor,
-                    action=action,
-                    log_prob=log_prob,
-                    value=value,
-                    reward=reward,
-                    done=done,
-                    info=info
-                )
-                self.replay_buffer.add(experience)
-                
-                # Track stats
-                self.stats.push_experience(experience)
+                # store experiences for each agent
+                for data in collected_step_data:
+                    agent_reward = (
+                        reward.get(data["agent_id"], 0.0)
+                        if isinstance(reward, dict)
+                        else reward
+                    )
+                    experience = Experience(
+                        agent_id=data["agent_id"],
+                        observation=data["observation"],
+                        action=data["action"],
+                        log_prob=data["log_prob"],
+                        value=data["value"],
+                        reward=agent_reward,
+                        done=done,
+                        info=info,
+                    )
+                    self.replay_buffer.add(experience)
+                    
+                    # Track stats per agent
+                    self.stats.push_experience(experience)
                 self.stats.step()
                 
                 # Accumulate episode reward
@@ -218,7 +235,7 @@ class PPOTrainer(Trainer):
 
                 for epoch in range(self.training_epochs):
                     # Sample a batch of experiences (trajectory)
-                    trajectory = self.replay_buffer.sample(self.BATCH_SIZE)
+                    trajectory = self.replay_buffer.sample_for_agent(agent.agent_id, self.BATCH_SIZE)
                     if not trajectory:
                         break
                     
@@ -314,7 +331,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
 
 
 

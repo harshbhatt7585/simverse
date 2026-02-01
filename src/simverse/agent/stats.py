@@ -101,6 +101,7 @@ if __name__ == "__main__":
         time.sleep(wait_time)
         stats.step()
         stats.push_experience(Experience(
+            agent_id=0,
             observation=np.array([1, 2, 3]), 
             action=np.array([4, 5, 6]), 
             log_prob=np.array([7, 8, 9]), 
