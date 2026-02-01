@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import random
 import sys
 from pathlib import Path
@@ -33,15 +34,26 @@ def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAg
     )
 
 
-def train():
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train Farmtila PPO agents")
+    parser.add_argument(
+        "--wandb",
+        choices=["on", "off"],
+        default="on",
+        help="Enable or disable Weights & Biases logging",
+    )
+    return parser.parse_args()
+
+
+def train(use_wandb: bool = True):
     # Training hyperparameters
     training_config = {
         "width": 30,
         "height": 20,
-        "num_agents": 8,
-        "max_steps": 150,
+        "num_agents": 4,
+        "max_steps": 1000,
         "episodes": 100,
-        "training_epochs": 10,
+        "training_epochs": 1,
         "lr": 0.001,
         "clip_epsilon": 0.2,
         "gamma": 0.99,
@@ -49,7 +61,8 @@ def train():
         "total_seeds": 500,
         "batch_size": 512,
         "buffer_size": 50000,
-        "device": "mps" if torch.backends.mps.is_available() else "cpu",
+        "device": "cpu",
+        "dtype": torch.float32,
     }
 
     config = FarmtilaConfig(
@@ -100,6 +113,8 @@ def train():
         device=training_config["device"],
         batch_size=training_config["batch_size"],
         buffer_size=training_config["buffer_size"],
+        dtype=training_config["dtype"],
+        use_wandb=use_wandb,
     )
 
     simulator = Simulator(
@@ -115,4 +130,5 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    cli_args = parse_args()
+    train(use_wandb=cli_args.wandb == "on")

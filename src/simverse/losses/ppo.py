@@ -1,3 +1,4 @@
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -15,7 +16,6 @@ try:
 except ImportError:
     wandb = None
     _WANDB_AVAILABLE = False
-
 logger = get_logger(__name__)
 
 
@@ -40,6 +40,8 @@ class PPOTrainer(Trainer):
         device: Union[torch.device, str] = "cpu",
         batch_size: int = DEFAULT_BATCH_SIZE,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
+        dtype: torch.dtype = torch.float32,
+        use_wandb: bool = True,
     ):
         super().__init__()
 
@@ -63,10 +65,12 @@ class PPOTrainer(Trainer):
         self.project_name = project_name
         self.run_name = run_name
         self._wandb_initialized = False
+        self.use_wandb = use_wandb
         self.episode_save_dir = episode_save_dir
         self._env_metadata_cache: Dict[str, Any] | None = None
         self.device = torch.device(device)
         self.batch_size = batch_size
+        self.dtype = dtype
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -148,17 +152,17 @@ class PPOTrainer(Trainer):
         if self.config:
             training_logger.config(self.config)
 
-        if _WANDB_AVAILABLE:
+        if self.use_wandb and _WANDB_AVAILABLE:
             training_logger.info("Weights & Biases logging enabled")
             wandb.init(project=self.project_name, name=self.run_name, config=self.config)
             self._wandb_initialized = True
-        else:
+        elif self.use_wandb:
             training_logger.warning(
                 "Weights & Biases not available - install with: pip install wandb"
             )
 
     def _finish_logging(self):
-        if self._wandb_initialized and _WANDB_AVAILABLE:
+        if self._wandb_initialized and self.use_wandb and _WANDB_AVAILABLE:
             wandb.finish()
             training_logger.success("Wandb run finished")
 
@@ -214,6 +218,10 @@ class PPOTrainer(Trainer):
         training_logger.success("Environment and policies initialized")
 
         training_logger.start_training(self.episodes)
+        training_start = time.perf_counter()
+        paused_time = 0.0
+        last_active_time = 0.0
+        last_total_steps = 0
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
@@ -234,7 +242,7 @@ class PPOTrainer(Trainer):
                     with torch.no_grad():
                         obs_tensor = (
                             torch.from_numpy(obs["obs"])  # type: ignore[arg-type]
-                            .float()
+                            .to(self.dtype)
                             .unsqueeze(0)
                             .to(self.device)
                         )
@@ -297,8 +305,20 @@ class PPOTrainer(Trainer):
 
                 # Log step progress (every 10 steps to reduce output)
                 if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
+                    active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
+                    total_steps_done = episode * self.env.config.max_steps + step + 1
+                    delta_steps = total_steps_done - last_total_steps
+                    delta_time = max(active_time - last_active_time, 1e-8)
+                    steps_per_sec = delta_steps / delta_time
+                    last_active_time = active_time
+                    last_total_steps = total_steps_done
                     training_logger.log_step(
-                        step + 1, self.env.config.max_steps, {"reward": episode_reward}
+                        step + 1,
+                        self.env.config.max_steps,
+                        {
+                            "reward": episode_reward,
+                            "steps_per_sec": round(steps_per_sec, 2),
+                        },
                     )
 
             # Clear the step progress line before training logs
@@ -341,7 +361,7 @@ class PPOTrainer(Trainer):
 
                     # Compute returns (advantages + values)
                     returns = advantages + torch.tensor(
-                        values, dtype=torch.float32, device=self.device
+                        values, dtype=self.dtype, device=self.device
                     )
 
                     # PPO update for each step in trajectory
@@ -389,10 +409,15 @@ class PPOTrainer(Trainer):
 
             self.stats.push_reward(episode_reward)
 
+            pause_start = time.perf_counter()
             if self.episode_save_dir:
+                serializable_config = {
+                    key: (str(value) if isinstance(value, torch.dtype) else value)
+                    for key, value in self.config.items()
+                }
                 metadata = {
                     "env_config": self._env_metadata(),
-                    "training_config": self.config,
+                    "training_config": serializable_config,
                 }
                 output_path = self.stats.dump_episode_recording(
                     self.episode_save_dir,
@@ -402,6 +427,7 @@ class PPOTrainer(Trainer):
                 training_logger.info(f"Saved episode metrics to {output_path}")
 
             self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
+            paused_time += time.perf_counter() - pause_start
 
         training_logger.finish(
             {
