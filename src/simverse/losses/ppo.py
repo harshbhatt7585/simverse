@@ -292,8 +292,8 @@ class PPOTrainer(Trainer):
                         value_loss.item()
                     )
                     
-                    # Track and log losses
-                    self.stats.push_losses(policy_loss.item(), value_loss.item())
+                    # Track and log losses (per agent)
+                    self.stats.push_agent_losses(agent.agent_id, policy_loss.item(), value_loss.item())
                     self.stats.log_wandb(step=self.stats.steps)
             
             # Episode summary
@@ -331,7 +331,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
 
 
 

@@ -7,7 +7,8 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, DefaultDict
+from collections import defaultdict
 
 from simverse.utils.replay_buffer import Experience
 import numpy as np
@@ -31,6 +32,9 @@ class TrainingStats:
     episode_rewards: List[float] = field(default_factory=list)  # Total episode rewards
     policy_losses: List[float] = field(default_factory=list)
     value_losses: List[float] = field(default_factory=list)
+    agent_metrics: DefaultDict[int, DefaultDict[str, List[float]]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(list))
+    )
 
     def push_experience(self, experience: Experience) -> None:
         self.experiences.append(experience)
@@ -38,11 +42,18 @@ class TrainingStats:
         reward = experience.reward
         if isinstance(reward, dict):
             reward = sum(reward.values())
-        self.step_rewards.append(float(reward) if reward else 0.0)
+        numeric_reward = float(reward) if reward else 0.0
+        self.step_rewards.append(numeric_reward)
+        self._record_agent_metric(experience.agent_id, "reward", numeric_reward)
 
-    def push_losses(self, policy_loss: float, value_loss: float) -> None:
+    def push_agent_losses(self, agent_id: int, policy_loss: float, value_loss: float) -> None:
         self.policy_losses.append(policy_loss)
         self.value_losses.append(value_loss)
+        self._record_agent_metric(agent_id, "loss/policy", policy_loss)
+        self._record_agent_metric(agent_id, "loss/value", value_loss)
+
+    def _record_agent_metric(self, agent_id: int, metric: str, value: float) -> None:
+        self.agent_metrics[agent_id][metric].append(value)
 
     def push_reward(self, reward: float) -> None:
         """Push total episode reward."""
@@ -62,6 +73,10 @@ class TrainingStats:
         # Step-level rewards
         if self.step_rewards:
             payload["step/reward"] = self.step_rewards[-1]
+        for agent_id, metrics in self.agent_metrics.items():
+            reward_history = metrics.get("reward")
+            if reward_history:
+                payload[f"agent/{agent_id}/reward"] = reward_history[-1]
             
         # Episode-level rewards
         if self.episode_rewards:
@@ -76,10 +91,18 @@ class TrainingStats:
         if self.policy_losses:
             payload["loss/policy"] = self.policy_losses[-1]
             payload["loss/policy_avg"] = sum(self.policy_losses) / len(self.policy_losses)
+        for agent_id, metrics in self.agent_metrics.items():
+            policy_losses = metrics.get("loss/policy")
+            if policy_losses:
+                payload[f"agent/{agent_id}/loss/policy"] = policy_losses[-1]
             
         if self.value_losses:
             payload["loss/value"] = self.value_losses[-1]
             payload["loss/value_avg"] = sum(self.value_losses) / len(self.value_losses)
+        for agent_id, metrics in self.agent_metrics.items():
+            value_losses = metrics.get("loss/value")
+            if value_losses:
+                payload[f"agent/{agent_id}/loss/value"] = value_losses[-1]
             
         wandb.log(payload, step=step)
     
@@ -110,6 +133,6 @@ if __name__ == "__main__":
             done=False, 
             info={}
         ))
-        stats.push_losses(policy_loss=0.1 * step, value_loss=0.05 * step)
+        stats.push_agent_losses(agent_id=0, policy_loss=0.1 * step, value_loss=0.05 * step)
         stats.log_wandb(step=stats.steps)
     wandb.finish()
