@@ -91,6 +91,7 @@ def train():
         config=training_config,
         project_name="simverse-farmtila",
         run_name="ppo-training",
+        episode_save_dir="recordings/farmtila",
     )
     
     simulator = Simulator(

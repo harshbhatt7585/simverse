@@ -38,6 +38,7 @@ class PPOTrainer(Trainer):
         config: Optional[Dict[str, Any]] = None,
         project_name: str = "simverse",
         run_name: str = "ppo-training",
+        episode_save_dir: str | None = None,
     ):
         super().__init__()
 
@@ -59,6 +60,7 @@ class PPOTrainer(Trainer):
         self.project_name = project_name
         self.run_name = run_name
         self._wandb_initialized = False
+        self.episode_save_dir = episode_save_dir
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -308,6 +310,10 @@ class PPOTrainer(Trainer):
             # Track episode reward
             self.stats.push_reward(episode_reward)
 
+            if self.episode_save_dir:
+                output_path = self.stats.dump_agent_metrics(self.episode_save_dir, episode + 1)
+                training_logger.info(f"Saved episode metrics to {output_path}")
+
             self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
         
         # Final summary
@@ -331,7 +337,6 @@ class PPOTrainer(Trainer):
                 
 
             
-
 
 
 

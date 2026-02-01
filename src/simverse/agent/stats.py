@@ -7,8 +7,10 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, DefaultDict
+from typing import Dict, List, Optional, DefaultDict, Any
 from collections import defaultdict
+import json
+from pathlib import Path
 
 from simverse.utils.replay_buffer import Experience
 import numpy as np
@@ -110,6 +112,21 @@ class TrainingStats:
         """Reset episode-level stats."""
         self.step_rewards.clear()
         self.experiences.clear()
+
+    def dump_agent_metrics(self, output_dir: str | Path, episode: int) -> Path:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload: Dict[str, Any] = {
+            "episode": episode,
+            "steps": self.steps,
+            "agent_metrics": {
+                agent_id: {metric: values for metric, values in metrics.items()}
+                for agent_id, metrics in self.agent_metrics.items()
+            },
+        }
+        output_path = output_dir / f"episode_{episode:04d}.json"
+        output_path.write_text(json.dumps(payload, indent=2))
+        return output_path
 
     
 if __name__ == "__main__":
