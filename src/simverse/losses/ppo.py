@@ -219,6 +219,9 @@ class PPOTrainer(Trainer):
 
         training_logger.start_training(self.episodes)
         training_start = time.perf_counter()
+        paused_time = 0.0
+        last_active_time = 0.0
+        last_total_steps = 0
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
@@ -302,9 +305,13 @@ class PPOTrainer(Trainer):
 
                 # Log step progress (every 10 steps to reduce output)
                 if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
-                    elapsed = max(time.perf_counter() - training_start, 1e-8)
+                    active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
                     total_steps_done = episode * self.env.config.max_steps + step + 1
-                    steps_per_sec = total_steps_done / elapsed
+                    delta_steps = total_steps_done - last_total_steps
+                    delta_time = max(active_time - last_active_time, 1e-8)
+                    steps_per_sec = delta_steps / delta_time
+                    last_active_time = active_time
+                    last_total_steps = total_steps_done
                     training_logger.log_step(
                         step + 1,
                         self.env.config.max_steps,
@@ -402,6 +409,7 @@ class PPOTrainer(Trainer):
 
             self.stats.push_reward(episode_reward)
 
+            pause_start = time.perf_counter()
             if self.episode_save_dir:
                 serializable_config = {
                     key: (str(value) if isinstance(value, torch.dtype) else value)
@@ -419,6 +427,7 @@ class PPOTrainer(Trainer):
                 training_logger.info(f"Saved episode metrics to {output_path}")
 
             self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
+            paused_time += time.perf_counter() - pause_start
 
         training_logger.finish(
             {
