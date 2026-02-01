@@ -1071,10 +1071,42 @@ if __name__ == "__main__":
     parser.add_argument("--max-frames", type=int, default=int(os.environ.get("FARMTILA_MAX_FRAMES", "0")))
     parser.add_argument("--max-episodes", type=int, default=int(os.environ.get("FARMTILA_MAX_EPISODES", "0")))
     parser.add_argument("--replay", type=str, help="Path to a replay JSON file", default=None)
+    parser.add_argument("--replay-dir", type=str, help="Directory containing replay JSON files")
     parser.add_argument("--loop", action="store_true", help="Loop replay when it finishes")
     args = parser.parse_args()
 
-    if args.replay:
+    if args.replay_dir:
+        replay_dir = Path(args.replay_dir)
+        if not replay_dir.exists():
+            raise SystemExit(f"Replay directory not found: {replay_dir}")
+        replay_files = sorted(replay_dir.glob("*.json"))
+        if not replay_files:
+            raise SystemExit(f"No replay JSON files found in {replay_dir}")
+        first_data = json.loads(replay_files[0].read_text())
+        env_meta = first_data.get("metadata", {}).get("env_config", {})
+        width = env_meta.get("width", args.width)
+        height = env_meta.get("height", args.height)
+        renderer = FarmtilaRender(
+            width=width,
+            height=height,
+            cell_size=args.cell_size,
+            fps=args.fps,
+            external_control=True,
+        )
+        try:
+            loop_all = True
+            while loop_all:
+                for replay_file in replay_files:
+                    data = json.loads(replay_file.read_text())
+                    renderer.load_replay_data(data, source_path=str(replay_file))
+                    renderer.play_replay(loop=False)
+                if not args.loop:
+                    loop_all = False
+        except SystemExit:
+            pass
+        finally:
+            renderer.close()
+    elif args.replay:
         data = json.loads(Path(args.replay).read_text())
         env_meta = data.get("metadata", {}).get("env_config", {})
         width = env_meta.get("width", args.width)
