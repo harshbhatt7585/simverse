@@ -1,6 +1,6 @@
-from dataclasses import dataclass
-from collections import deque
 import random
+from collections import deque
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 
@@ -26,13 +26,11 @@ class Trajectory:
     episodes: List[Episode]
 
 
-
-
 class ReplayBuffer:
     def __init__(self, max_size: int = 10000):
         self.max_size = max_size
         self.buffer = deque(maxlen=max_size)
-        
+
     def add(self, experience: Experience) -> None:
         self.buffer.append(experience)
 

@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
+
 import gymnasium as gym
 
+
 class SimEnv(ABC):
-
-
     @property
     @abstractmethod
     def action_space(self) -> gym.spaces.Space:

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Tuple
 
-import numpy as np
 import gymnasium as gym
-
-from simverse.envs.farmtila.config import FarmtilaConfig
-from simverse.envs.farmtila.agent import FarmtilaAgent
+import numpy as np
 
 from simverse.abstractor.simenv import SimEnv
+from simverse.envs.farmtila.agent import FarmtilaAgent
+from simverse.envs.farmtila.config import FarmtilaConfig
+
 
 class FarmtilaEnv(SimEnv):
     HARVEST_ACTION = 4
@@ -90,10 +90,7 @@ class FarmtilaEnv(SimEnv):
         return self._package_step_result()
 
     def step_random(self):
-        actions = {
-            agent.agent_id: int(self.rng.integers(0, 4))
-            for agent in self.agents
-        }
+        actions = {agent.agent_id: int(self.rng.integers(0, 4)) for agent in self.agents}
         return self.step(actions)
 
     def render(self):
@@ -141,14 +138,17 @@ class FarmtilaEnv(SimEnv):
         for agent in self.agents:
             x, y = agent.position
             agent_grid[x, y] = agent.agent_id + 1  # +1 so 0 means empty
-        
+
         # [4, width, height]: seed_grid, owner_grid, farm_grid, agent_grid
-        obs = np.stack([
-            self.seed_grid.astype(np.float32), 
-            self.owner_grid.astype(np.float32), 
-            self.farm_grid.astype(np.float32), 
-            agent_grid
-        ], axis=0)
+        obs = np.stack(
+            [
+                self.seed_grid.astype(np.float32),
+                self.owner_grid.astype(np.float32),
+                self.farm_grid.astype(np.float32),
+                agent_grid,
+            ],
+            axis=0,
+        )
 
         return {
             "obs": obs,
@@ -167,7 +167,9 @@ class FarmtilaEnv(SimEnv):
             "steps": self.steps,
         }
 
-    def get_grid_seed_random(self, *, force: bool = False, limit: int | None = None) -> List[Tuple[int, int]]:
+    def get_grid_seed_random(
+        self, *, force: bool = False, limit: int | None = None
+    ) -> List[Tuple[int, int]]:
         if self.config.spawn_seed_every <= 0 and not force:
             return []
         if not force and self.steps % self.config.spawn_seed_every != 0:
@@ -243,7 +245,9 @@ class FarmtilaEnv(SimEnv):
             return True
         return False
 
-    def _normalize_actions(self, actions: Dict[int, int] | Iterable[int] | int | None) -> Dict[int, int]:
+    def _normalize_actions(
+        self, actions: Dict[int, int] | Iterable[int] | int | None
+    ) -> Dict[int, int]:
         if actions is None:
             return {}
         if isinstance(actions, dict):

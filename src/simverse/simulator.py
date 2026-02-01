@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import random
-from typing import Callable, List, Optional, Any, Protocol
+from typing import Callable, List, Optional, Protocol
+
+import torch
+from torch.distributions import Categorical
 
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.policy import Policy
 from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.trainer import Trainer
-
 from simverse.utils.checkpointer import Checkpointer
-import torch
-from torch.distributions import Categorical
 
 AgentFactory = Callable[[int, Policy, SimEnv], SimAgent]
 
 
 class Renderer(Protocol):
     """Protocol for environment renderers."""
+
     def draw(self, env: SimEnv) -> None: ...
     def handle_events(self) -> None: ...
     def close(self) -> None: ...
@@ -41,7 +42,6 @@ class Simulator:
         self.loss_trainer = loss_trainer
         self.agent_factory = agent_factory
 
-
         self.checkpointer = Checkpointer(self.env)
 
     def _build_agents(self) -> List[SimAgent]:
@@ -61,17 +61,15 @@ class Simulator:
 
     def train(self, *args, **kwargs) -> None:
         agents = self._build_agents()
-        if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
+        if hasattr(self.env, "assign_agents") and callable(self.env.assign_agents):
             self.env.assign_agents(agents)
         elif hasattr(self.env, "agents"):
             self.env.agents = agents
         self.loss_trainer.train(self.env, agents, *args, **kwargs)
-    
 
     def load_checkpoint(self, checkpoint_path: str) -> None:
         self.checkpointer.load(checkpoint_path)
 
-    
     def run(
         self,
         checkpoint_path: Optional[str] = None,
@@ -80,14 +78,14 @@ class Simulator:
     ) -> None:
         """
         Run inference with trained policies.
-        
+
         Args:
             checkpoint_path: Path to load model checkpoint from
             max_steps: Maximum steps to run (defaults to env.config.max_steps)
             renderer: Optional renderer instance for visualization
         """
         agents = self._build_agents()
-        if hasattr(self.env, "assign_agents") and callable(getattr(self.env, "assign_agents")):
+        if hasattr(self.env, "assign_agents") and callable(self.env.assign_agents):
             self.env.assign_agents(agents)
         elif hasattr(self.env, "agents"):
             self.env.agents = agents
@@ -105,7 +103,7 @@ class Simulator:
                 # Handle renderer events (quit, keyboard, etc.)
                 if renderer:
                     renderer.handle_events()
-                
+
                 # Collect actions from all agents
                 actions = {}
                 for agent in agents:
@@ -119,18 +117,13 @@ class Simulator:
                     actions[agent.agent_id] = action
 
                 obs, reward, done, info = self.env.step(actions)
-                
+
                 # Render the environment
                 if renderer:
                     renderer.draw(self.env)
-                
+
                 step += 1
         finally:
             # Clean up renderer
             if renderer:
                 renderer.close()
-
-
-
-
-    

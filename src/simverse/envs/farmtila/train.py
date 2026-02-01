@@ -1,31 +1,33 @@
 from __future__ import annotations
 
-from pathlib import Path
 import random
 import sys
+from pathlib import Path
 
 if __package__ is None or __package__.startswith("__main__"):
     _src = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(_src))
 
-from simverse.simulator import Simulator
-
-from simverse.envs.farmtila.env import FarmtilaEnv
-from simverse.envs.farmtila.config import FarmtilaConfig
-
-from simverse.config.policy import PolicySpec
-from simverse.policies.simple import SimplePolicy
-from simverse.losses.ppo import PPOTrainer
-from simverse.agent.stats import TrainingStats
 import torch
+
 from simverse.abstractor.policy import Policy
+from simverse.agent.stats import TrainingStats
+from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
+from simverse.envs.farmtila.config import FarmtilaConfig
+from simverse.envs.farmtila.env import FarmtilaEnv
+from simverse.losses.ppo import PPOTrainer
+from simverse.policies.simple import SimplePolicy
+from simverse.simulator import Simulator
 
 
 def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
     return FarmtilaAgent(
         agent_id=agent_id,
-        position=(random.randint(0, env.config.width - 1), random.randint(0, env.config.height - 1)),
+        position=(
+            random.randint(0, env.config.width - 1),
+            random.randint(0, env.config.height - 1),
+        ),
         action_space=env.action_space,
         policy=policy,
     )
@@ -46,7 +48,7 @@ def train():
         "gae_lambda": 0.95,
         "total_seeds": 500,
     }
-    
+
     config = FarmtilaConfig(
         width=training_config["width"],
         height=training_config["height"],
@@ -69,13 +71,13 @@ def train():
         for agent_id in range(training_config["num_agents"])
     ]
     env.config.policies = policy_specs
-    
+
     policy_models = [ps.model for ps in env.config.policies]
     optimizers = {
         agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=training_config["lr"])
         for agent_id in range(training_config["num_agents"])
     }
-    
+
     # Create stats tracker
     stats = TrainingStats()
 
@@ -93,20 +95,18 @@ def train():
         run_name="ppo-training",
         episode_save_dir="recordings/farmtila",
     )
-    
+
     simulator = Simulator(
         env=env,
         num_agents=training_config["num_agents"],
         policies=policy_models,
         loss_trainer=loss_trainer,
-        agent_factory=agent_factory
+        agent_factory=agent_factory,
     )
 
     # Start training
     simulator.train(title="Farmtila Training")
 
 
-
 if __name__ == "__main__":
     train()
-    

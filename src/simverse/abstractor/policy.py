@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-import numpy as np
-from torch.nn import Module
+
 import torch
+from torch.nn import Module
+
 
 class Policy(ABC, Module):
     @abstractmethod
@@ -11,5 +12,3 @@ class Policy(ABC, Module):
     @abstractmethod
     def forward(self, *args, **kwargs) -> torch.Tensor:
         pass
-
-

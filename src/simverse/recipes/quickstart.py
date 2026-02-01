@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Type
+from typing import Dict, List, Type
 
 import numpy as np
 
@@ -24,7 +24,7 @@ def quicktrain(
     policy = policy_cls(env.action_space)
 
     rewards: List[float] = []
-    for episode in range(episodes):
+    for _episode in range(episodes):
         obs = env.reset()
         total_reward = 0.0
         for _step in range(max_steps):

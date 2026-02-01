@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 
 class RandomPolicy:
     """Randomly samples valid actions from the bound environment."""

@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-import numpy as np
 from typing import Optional
+
+import numpy as np
+
 from simverse.abstractor.policy import Policy
+
 
 class SimAgent(ABC):
     @abstractmethod
@@ -35,7 +38,7 @@ class SimAgent(ABC):
     @abstractmethod
     def get_memory(self) -> dict:
         pass
-    
+
     @abstractmethod
     def current_state(self) -> np.ndarray:
         pass
@@ -47,5 +50,3 @@ class SimAgent(ABC):
     @abstractmethod
     def set_policy(self, policy: Policy) -> None:
         pass
-    
-   
