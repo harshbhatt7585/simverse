@@ -547,7 +547,6 @@ class FarmtilaRender:
         
         # Draw agent stats panel on the right
         self._draw_agent_stats_panel(env)
-        self._draw_episode_counter()
         
         # Draw winner overlay if episode ended
         if self.showing_winner:
@@ -841,7 +840,9 @@ class FarmtilaRender:
         # Panel title
         title_text = self.panel_title_font.render("AGENTS", True, COLORS["ui_accent"])
         title_x = panel_x + (self.panel_width - title_text.get_width()) // 2
-        self.screen.blit(title_text, (title_x, self.panel_padding))
+        title_y = self.panel_padding
+        self.screen.blit(title_text, (title_x, title_y))
+        counter_bottom = self._draw_episode_counter(panel_x, title_y + title_text.get_height())
         
         # Decorative line under title
         line_y = self.panel_padding + title_text.get_height() + 6
@@ -855,7 +856,7 @@ class FarmtilaRender:
             agent_farms[agent.agent_id] = int(np.sum(env.owner_grid == agent.agent_id))
         
         # Draw each agent's stats
-        card_start_y = line_y + 12
+        card_start_y = counter_bottom + 16
         card_height = max(60, int(self.cell_size * 2.2))
         card_spacing = 8
         
@@ -919,7 +920,7 @@ class FarmtilaRender:
         
         inv_label = self.panel_small_font.render("Inventory:", True, (150, 150, 160))
         self.screen.blit(inv_label, (content_x + 16, stats_y))
-        
+
         inv_value_color = (100, 255, 150) if agent.inventory > 0 else COLORS["ui_text"]
         inv_value = self.panel_font.render(str(agent.inventory), True, inv_value_color)
         self.screen.blit(inv_value, (content_x + 16 + inv_label.get_width() + 4, stats_y - 2))
@@ -939,6 +940,25 @@ class FarmtilaRender:
         farm_value_color = (255, 200, 100) if farm_count > 0 else COLORS["ui_text"]
         farm_value = self.panel_font.render(str(farm_count), True, farm_value_color)
         self.screen.blit(farm_value, (content_x + 16 + farm_label.get_width() + 4, farms_y - 2))
+
+    def _draw_episode_counter(self, panel_x: int, title_bottom: int) -> int:
+        panel_width = self.panel_width - self.panel_padding * 2
+        counter_height = int(self.cell_size * 2)
+        counter_y = title_bottom + 8
+        counter_rect = pygame.Rect(panel_x + self.panel_padding, counter_y, panel_width, counter_height)
+        surface = pygame.Surface(counter_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(surface, (*COLORS["ui_bg"][:3], 230), surface.get_rect(), border_radius=10)
+        pygame.draw.rect(surface, COLORS["ui_accent"], surface.get_rect(), width=2, border_radius=10)
+        self.screen.blit(surface, counter_rect.topleft)
+
+        title = self.panel_font.render("Episodes", True, COLORS["ui_text"])
+        total = self.panel_title_font.render(str(self.episodes_completed), True, COLORS["ui_text"])
+        label = self.panel_small_font.render("completed", True, COLORS["ui_text"])
+        padding_x = 8
+        self.screen.blit(title, (counter_rect.x + padding_x, counter_rect.y + 6))
+        self.screen.blit(total, (counter_rect.x + padding_x + 10, counter_rect.y + 10 + title.get_height()))
+        self.screen.blit(label, (counter_rect.x + padding_x, counter_rect.bottom - label.get_height() - 8))
+        return counter_rect.bottom
 
     def _render_button_text(self, label: str) -> pygame.Surface:
         return self.font.render(label, True, COLORS["ui_text"])
