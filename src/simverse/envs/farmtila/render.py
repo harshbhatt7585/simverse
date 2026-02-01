@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,6 +19,15 @@ import pygame
 
 from simverse.envs.farmtila.env import FarmtilaEnv
 from simverse.envs.farmtila.config import FarmtilaConfig
+
+
+@dataclass
+class ReplayState:
+    frames: List[Dict[str, Any]] = field(default_factory=list)
+    index: int = 0
+    playing: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    env: FarmtilaEnv | None = None
 
 KEY_TO_ACTION = {
     pygame.K_UP: 0,
@@ -151,12 +161,8 @@ class FarmtilaRender:
         
         pygame.display.set_caption("🌾 Farmtila")
 
-        # Replay state
-        self.replay_frames: List[Dict[str, Any]] = []
-        self.replay_index = 0
-        self.replay_playing = False
-        self.replay_env: FarmtilaEnv | None = None
-        self.replay_metadata: Dict[str, Any] = {}
+        # Replay state container
+        self.replay = ReplayState()
 
     def _init_display(self) -> pygame.Surface:
         # Add panel width to the right side
@@ -492,9 +498,7 @@ class FarmtilaRender:
             if self.showing_winner:
                 self.winner_display_frames += 1
                 if self.winner_display_frames >= self.winner_display_duration:
-                    # Reset the episode
-                    self.showing_winner = False
-                    self.winner_display_frames = 0
+                    self._reset_winner_overlay()
                     self.episodes_completed += 1
                     env.reset()
             elif self.running_random and not env.done:
@@ -512,8 +516,7 @@ class FarmtilaRender:
             elif env.done and self.showing_winner:
                 self.winner_display_frames += 1
             elif not env.done and self.showing_winner:
-                self.showing_winner = False
-                self.winner_display_frames = 0
+                self._reset_winner_overlay()
         
         # Draw grass background
         self.screen.blit(self.grass_surface, (0, 0))
@@ -574,6 +577,10 @@ class FarmtilaRender:
     def close(self):
         pygame.quit()
 
+    def _reset_winner_overlay(self) -> None:
+        self.showing_winner = False
+        self.winner_display_frames = 0
+
     # Replay utilities -------------------------------------------------
 
     def load_replay(self, replay_path: str) -> None:
@@ -581,8 +588,8 @@ class FarmtilaRender:
         self.load_replay_data(data, source_path=replay_path)
 
     def load_replay_data(self, data: Dict[str, Any], source_path: str | None = None) -> None:
-        self.replay_metadata = data.get("metadata", {})
-        env_config_data = self.replay_metadata.get("env_config", {})
+        self.replay.metadata = data.get("metadata", {})
+        env_config_data = self.replay.metadata.get("env_config", {})
         config = FarmtilaConfig(
             width=env_config_data.get("width", self.width),
             height=env_config_data.get("height", self.height),
@@ -598,36 +605,35 @@ class FarmtilaRender:
                 "Replay grid size does not match renderer dimensions. "
                 f"Replay: {config.width}x{config.height}, Renderer: {self.width}x{self.height}"
             )
-        self.replay_env = FarmtilaEnv(config=config)
-        self.replay_env.reset()
-        self.replay_frames = data.get("frames", [])
-        self.replay_index = 0
-        self.replay_playing = False
+        self.replay.env = FarmtilaEnv(config=config)
+        self.replay.env.reset()
+        self.replay.frames = data.get("frames", [])
+        self.replay.index = 0
+        self.replay.playing = False
         self.external_control = True
-        self.showing_winner = False
-        self.winner_display_frames = 0
-        if not self.replay_frames:
+        self._reset_winner_overlay()
+        if not self.replay.frames:
             raise ValueError("Replay file contains no frames: " + (source_path or "<memory>"))
 
     def play_replay(self, loop: bool = False) -> None:
-        if not self.replay_env or not self.replay_frames:
+        if not self.replay.env or not self.replay.frames:
             raise ValueError("No replay loaded")
-        self.replay_playing = True
+        self.replay.playing = True
         try:
-            while self.replay_playing:
+            while self.replay.playing:
                 if not self._handle_replay_events():
                     break
-                frame = self.replay_frames[self.replay_index]
+                frame = self.replay.frames[self.replay.index]
                 self._apply_replay_frame(frame)
-                self.draw(self.replay_env)
-                self.replay_index += 1
-                if self.replay_index >= len(self.replay_frames):
+                self.draw(self.replay.env)
+                self.replay.index += 1
+                if self.replay.index >= len(self.replay.frames):
                     if loop:
-                        self.replay_index = 0
+                        self.replay.index = 0
                     else:
-                        self.replay_playing = False
+                        self.replay.playing = False
         finally:
-            self.replay_playing = False
+            self.replay.playing = False
 
     def _handle_replay_events(self) -> bool:
         for event in pygame.event.get():
@@ -638,28 +644,29 @@ class FarmtilaRender:
         return True
 
     def _apply_replay_frame(self, frame: Dict[str, Any]) -> None:
-        if not self.replay_env:
+        env = self.replay.env
+        if not env:
             return
         obs_data = frame.get("observation")
         if obs_data is not None:
             obs_array = np.array(obs_data, dtype=np.float32)
             if obs_array.shape[0] >= 3:
-                self.replay_env.seed_grid = obs_array[0]
-                self.replay_env.owner_grid = obs_array[1]
-                self.replay_env.farm_grid = obs_array[2]
-        self.replay_env.steps = int(frame.get("step", self.replay_env.steps))
-        self.replay_env.done = bool(frame.get("done", False))
+                env.seed_grid = obs_array[0]
+                env.owner_grid = obs_array[1]
+                env.farm_grid = obs_array[2]
+        env.steps = int(frame.get("step", env.steps))
+        env.done = bool(frame.get("done", False))
         info = frame.get("info", {}) or {}
         winner_id = info.get("winner")
-        if winner_id is not None and self.replay_env.agents and 0 <= winner_id < len(self.replay_env.agents):
-            self.replay_env.winner = self.replay_env.agents[winner_id]
+        if winner_id is not None and env.agents and 0 <= winner_id < len(env.agents):
+            env.winner = env.agents[winner_id]
         else:
-            self.replay_env.winner = None
+            env.winner = None
         for agent_state in frame.get("agents", []):
             agent_id = agent_state.get("id")
-            if agent_id is None or agent_id >= len(self.replay_env.agents):
+            if agent_id is None or agent_id >= len(env.agents):
                 continue
-            agent = self.replay_env.agents[agent_id]
+            agent = env.agents[agent_id]
             position = agent_state.get("position")
             if position:
                 agent.position = (int(position[0]), int(position[1]))
