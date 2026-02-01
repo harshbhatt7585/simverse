@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import json
 import math
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -147,6 +150,13 @@ class FarmtilaRender:
         self.medium_font = pygame.font.SysFont("Verdana", max(16, int(self.cell_size * 0.6)), bold=True)
         
         pygame.display.set_caption("🌾 Farmtila")
+
+        # Replay state
+        self.replay_frames: List[Dict[str, Any]] = []
+        self.replay_index = 0
+        self.replay_playing = False
+        self.replay_env: FarmtilaEnv | None = None
+        self.replay_metadata: Dict[str, Any] = {}
 
     def _init_display(self) -> pygame.Surface:
         # Add panel width to the right side
@@ -561,6 +571,97 @@ class FarmtilaRender:
     def close(self):
         pygame.quit()
 
+    # Replay utilities -------------------------------------------------
+
+    def load_replay(self, replay_path: str) -> None:
+        data = json.loads(Path(replay_path).read_text())
+        self.load_replay_data(data, source_path=replay_path)
+
+    def load_replay_data(self, data: Dict[str, Any], source_path: str | None = None) -> None:
+        self.replay_metadata = data.get("metadata", {})
+        env_config_data = self.replay_metadata.get("env_config", {})
+        config = FarmtilaConfig(
+            width=env_config_data.get("width", self.width),
+            height=env_config_data.get("height", self.height),
+            num_agents=env_config_data.get("num_agents", 4),
+            spawn_seed_every=env_config_data.get("spawn_seed_every", 100),
+            seeds_per_spawn=env_config_data.get("seeds_per_spawn", 10),
+            max_steps=env_config_data.get("max_steps", 100),
+            total_seeds_per_episode=env_config_data.get("total_seeds_per_episode", 500),
+            policies=[],
+        )
+        if config.width != self.width or config.height != self.height:
+            raise ValueError(
+                "Replay grid size does not match renderer dimensions. "
+                f"Replay: {config.width}x{config.height}, Renderer: {self.width}x{self.height}"
+            )
+        self.replay_env = FarmtilaEnv(config=config)
+        self.replay_env.reset()
+        self.replay_frames = data.get("frames", [])
+        self.replay_index = 0
+        self.replay_playing = False
+        self.external_control = True
+        if not self.replay_frames:
+            raise ValueError("Replay file contains no frames: " + (source_path or "<memory>"))
+
+    def play_replay(self, loop: bool = False) -> None:
+        if not self.replay_env or not self.replay_frames:
+            raise ValueError("No replay loaded")
+        self.replay_playing = True
+        try:
+            while self.replay_playing:
+                if not self._handle_replay_events():
+                    break
+                frame = self.replay_frames[self.replay_index]
+                self._apply_replay_frame(frame)
+                self.draw(self.replay_env)
+                self.replay_index += 1
+                if self.replay_index >= len(self.replay_frames):
+                    if loop:
+                        self.replay_index = 0
+                    else:
+                        self.replay_playing = False
+        finally:
+            self.replay_playing = False
+
+    def _handle_replay_events(self) -> bool:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return False
+        return True
+
+    def _apply_replay_frame(self, frame: Dict[str, Any]) -> None:
+        if not self.replay_env:
+            return
+        obs_data = frame.get("observation")
+        if obs_data is not None:
+            obs_array = np.array(obs_data, dtype=np.float32)
+            if obs_array.shape[0] >= 3:
+                self.replay_env.seed_grid = obs_array[0]
+                self.replay_env.owner_grid = obs_array[1]
+                self.replay_env.farm_grid = obs_array[2]
+        self.replay_env.steps = int(frame.get("step", self.replay_env.steps))
+        self.replay_env.done = bool(frame.get("done", False))
+        info = frame.get("info", {}) or {}
+        winner_id = info.get("winner")
+        if winner_id is not None and self.replay_env.agents and 0 <= winner_id < len(self.replay_env.agents):
+            self.replay_env.winner = self.replay_env.agents[winner_id]
+        else:
+            self.replay_env.winner = None
+        for agent_state in frame.get("agents", []):
+            agent_id = agent_state.get("id")
+            if agent_id is None or agent_id >= len(self.replay_env.agents):
+                continue
+            agent = self.replay_env.agents[agent_id]
+            position = agent_state.get("position")
+            if position:
+                agent.position = (int(position[0]), int(position[1]))
+            agent.inventory = int(agent_state.get("inventory", agent.inventory))
+            agent.harvested_tiles = int(agent_state.get("harvested_tiles", agent.harvested_tiles))
+            agent.reward = float(agent_state.get("reward", agent.reward))
+
     def run_random_simulation(self):
         self.running_random = not self.running_random
         label = "⏹ Stop Simulation" if self.running_random else "▶ Run Simulation"
@@ -961,29 +1062,68 @@ class FarmtilaRender:
 
 
 if __name__ == "__main__":
-    render = FarmtilaRender(width=30, height=20, cell_size=32)
-    env = FarmtilaEnv(FarmtilaConfig(width=30, height=20, num_agents=4))
-    env.reset()
+    parser = argparse.ArgumentParser(description="Farmtila renderer")
+    parser.add_argument("--width", type=int, default=30, help="Grid width")
+    parser.add_argument("--height", type=int, default=20, help="Grid height")
+    parser.add_argument("--num-agents", type=int, default=4, help="Number of agents")
+    parser.add_argument("--cell-size", type=int, default=32, help="Cell size in pixels")
+    parser.add_argument("--fps", type=int, default=30, help="Frames per second")
+    parser.add_argument("--max-frames", type=int, default=int(os.environ.get("FARMTILA_MAX_FRAMES", "0")))
+    parser.add_argument("--max-episodes", type=int, default=int(os.environ.get("FARMTILA_MAX_EPISODES", "0")))
+    parser.add_argument("--replay", type=str, help="Path to a replay JSON file", default=None)
+    parser.add_argument("--loop", action="store_true", help="Loop replay when it finishes")
+    args = parser.parse_args()
 
-    render.run_random_simulation()
+    if args.replay:
+        data = json.loads(Path(args.replay).read_text())
+        env_meta = data.get("metadata", {}).get("env_config", {})
+        width = env_meta.get("width", args.width)
+        height = env_meta.get("height", args.height)
+        renderer = FarmtilaRender(
+            width=width,
+            height=height,
+            cell_size=args.cell_size,
+            fps=args.fps,
+            external_control=True,
+        )
+        renderer.load_replay_data(data, source_path=args.replay)
+        try:
+            renderer.play_replay(loop=args.loop)
+        except SystemExit:
+            pass
+        finally:
+            renderer.close()
+    else:
+        render = FarmtilaRender(
+            width=args.width,
+            height=args.height,
+            cell_size=args.cell_size,
+            fps=args.fps,
+        )
+        env = FarmtilaEnv(
+            FarmtilaConfig(
+                width=args.width,
+                height=args.height,
+                num_agents=args.num_agents,
+            )
+        )
+        env.reset()
 
-    max_frames = int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
-    max_episodes = int(os.environ.get("FARMTILA_MAX_EPISODES", "0"))
-    frames = 0
+        render.run_random_simulation()
 
-    try:
-        while True:
-            render.handle_events()
-            render.draw(env)
-            frames += 1
-            
-            # Check episode limit
-            if max_episodes and render.episodes_completed >= max_episodes:
-                break
-            # Check frame limit
-            if max_frames and frames >= max_frames:
-                break
-    except SystemExit:
-        pass
-    finally:
-        render.close()
+        frames = 0
+
+        try:
+            while True:
+                render.handle_events()
+                render.draw(env)
+                frames += 1
+                
+                if args.max_episodes and render.episodes_completed >= args.max_episodes:
+                    break
+                if args.max_frames and frames >= args.max_frames:
+                    break
+        except SystemExit:
+            pass
+        finally:
+            render.close()

@@ -37,6 +37,7 @@ class TrainingStats:
     agent_metrics: DefaultDict[int, DefaultDict[str, List[float]]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(list))
     )
+    current_episode_frames: List[Dict[str, Any]] = field(default_factory=list)
 
     def push_experience(self, experience: Experience) -> None:
         self.experiences.append(experience)
@@ -56,6 +57,9 @@ class TrainingStats:
 
     def _record_agent_metric(self, agent_id: int, metric: str, value: float) -> None:
         self.agent_metrics[agent_id][metric].append(value)
+
+    def record_frame(self, frame: Dict[str, Any]) -> None:
+        self.current_episode_frames.append(frame)
 
     def push_reward(self, reward: float) -> None:
         """Push total episode reward."""
@@ -112,8 +116,14 @@ class TrainingStats:
         """Reset episode-level stats."""
         self.step_rewards.clear()
         self.experiences.clear()
+        self.current_episode_frames.clear()
 
-    def dump_agent_metrics(self, output_dir: str | Path, episode: int) -> Path:
+    def dump_episode_recording(
+        self,
+        output_dir: str | Path,
+        episode: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Path:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         payload: Dict[str, Any] = {
@@ -123,9 +133,13 @@ class TrainingStats:
                 agent_id: {metric: values for metric, values in metrics.items()}
                 for agent_id, metrics in self.agent_metrics.items()
             },
+            "frames": self.current_episode_frames,
         }
+        if metadata:
+            payload["metadata"] = metadata
         output_path = output_dir / f"episode_{episode:04d}.json"
         output_path.write_text(json.dumps(payload, indent=2))
+        self.current_episode_frames.clear()
         return output_path
 
     

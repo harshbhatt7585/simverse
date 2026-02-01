@@ -38,7 +38,7 @@ class PPOTrainer(Trainer):
         config: Optional[Dict[str, Any]] = None,
         project_name: str = "simverse",
         run_name: str = "ppo-training",
-        episode_save_dir: str | None = "./recordings",
+        episode_save_dir: str | None = None,
     ):
         super().__init__()
 
@@ -61,6 +61,7 @@ class PPOTrainer(Trainer):
         self.run_name = run_name
         self._wandb_initialized = False
         self.episode_save_dir = episode_save_dir
+        self._env_metadata_cache: Dict[str, Any] | None = None
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -70,6 +71,66 @@ class PPOTrainer(Trainer):
         if self.optimizer is None:
             raise RuntimeError("No optimizer configured for PPOTrainer")
         return self.optimizer
+
+    def _env_metadata(self) -> Dict[str, Any]:
+        if self._env_metadata_cache is not None:
+            return self._env_metadata_cache
+        env = getattr(self, "env", None)
+        config = getattr(env, "config", None)
+        data: Dict[str, Any] = {}
+        if config is not None:
+            for attr in (
+                "width",
+                "height",
+                "num_agents",
+                "max_steps",
+                "spawn_seed_every",
+                "seeds_per_spawn",
+                "total_seeds_per_episode",
+            ):
+                if hasattr(config, attr):
+                    data[attr] = getattr(config, attr)
+        self._env_metadata_cache = data
+        return data
+
+    def _format_rewards(self, rewards: Any) -> Any:
+        if isinstance(rewards, dict):
+            formatted = []
+            for agent_id, value in rewards.items():
+                try:
+                    reward_value = float(value)
+                except (TypeError, ValueError):
+                    reward_value = 0.0
+                formatted.append({"agent_id": agent_id, "reward": reward_value})
+            return formatted
+        try:
+            return float(rewards)
+        except (TypeError, ValueError):
+            return rewards
+
+    def _build_frame_record(
+        self,
+        observation: Dict[str, Any],
+        actions: Dict[int, int],
+        rewards: Any,
+        info: Dict[str, Any],
+        step: int,
+        done: bool,
+    ) -> Dict[str, Any]:
+        obs_array = observation.get("obs")
+        serialized_obs = obs_array.tolist() if hasattr(obs_array, "tolist") else obs_array
+        return {
+            "step": step,
+            "observation": serialized_obs,
+            "agents": observation.get("agents", []),
+            "actions": [
+                {"agent_id": agent_id, "action": action}
+                for agent_id, action in sorted(actions.items())
+            ],
+            "rewards": self._format_rewards(rewards),
+            "info": info,
+            "done": bool(done),
+        }
     
     def _init_logging(self, title: str = "Training"):
         """Initialize beautiful logging and wandb."""
@@ -144,6 +205,7 @@ class PPOTrainer(Trainer):
     ):
         self.env = env
         self.agents = agents
+        self._env_metadata_cache = None
         
         # Initialize logging (header, config, wandb)
         self._init_logging(title)
@@ -154,6 +216,7 @@ class PPOTrainer(Trainer):
         
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
+            self.stats.reset_episode()
             
             self.env.reset()
             episode_reward = 0.0
@@ -190,6 +253,17 @@ class PPOTrainer(Trainer):
                         )
 
                 obs, reward, done, info = self.env.step(actions)
+
+                if self.episode_save_dir:
+                    frame_record = self._build_frame_record(
+                        obs,
+                        actions,
+                        reward,
+                        info,
+                        step + 1,
+                        done,
+                    )
+                    self.stats.record_frame(frame_record)
 
                 # store experiences for each agent
                 for data in collected_step_data:
@@ -311,7 +385,15 @@ class PPOTrainer(Trainer):
             self.stats.push_reward(episode_reward)
 
             if self.episode_save_dir:
-                output_path = self.stats.dump_agent_metrics(self.episode_save_dir, episode + 1)
+                metadata = {
+                    "env_config": self._env_metadata(),
+                    "training_config": self.config,
+                }
+                output_path = self.stats.dump_episode_recording(
+                    self.episode_save_dir,
+                    episode + 1,
+                    metadata=metadata,
+                )
                 training_logger.info(f"Saved episode metrics to {output_path}")
 
             self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
@@ -337,6 +419,3 @@ class PPOTrainer(Trainer):
                 
 
             
-
-
-
