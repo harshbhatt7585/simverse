@@ -38,7 +38,7 @@ class PPOTrainer(Trainer):
         config: Optional[Dict[str, Any]] = None,
         project_name: str = "simverse",
         run_name: str = "ppo-training",
-        episode_save_dir: str | None = None,
+        episode_save_dir: str | None = "./recordings",
     ):
         super().__init__()
 
