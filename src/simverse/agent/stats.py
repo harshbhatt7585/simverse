@@ -70,7 +70,7 @@ class TrainingStats:
         self.steps += 1
 
     def log_wandb(self, step: Optional[int] = None) -> None:
-        if not _WANDB_AVAILABLE:
+        if not _WANDB_AVAILABLE or getattr(wandb, "run", None) is None:
             return
         payload = {}
         payload["trainer/steps"] = self.steps

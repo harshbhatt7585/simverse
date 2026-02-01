@@ -15,7 +15,6 @@ try:
 except ImportError:
     wandb = None
     _WANDB_AVAILABLE = False
-
 logger = get_logger(__name__)
 
 
@@ -41,6 +40,7 @@ class PPOTrainer(Trainer):
         batch_size: int = DEFAULT_BATCH_SIZE,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
         dtype: torch.dtype = torch.float32,
+        use_wandb: bool = True,
     ):
         super().__init__()
 
@@ -64,6 +64,7 @@ class PPOTrainer(Trainer):
         self.project_name = project_name
         self.run_name = run_name
         self._wandb_initialized = False
+        self.use_wandb = use_wandb
         self.episode_save_dir = episode_save_dir
         self._env_metadata_cache: Dict[str, Any] | None = None
         self.device = torch.device(device)
@@ -150,17 +151,17 @@ class PPOTrainer(Trainer):
         if self.config:
             training_logger.config(self.config)
 
-        if _WANDB_AVAILABLE:
+        if self.use_wandb and _WANDB_AVAILABLE:
             training_logger.info("Weights & Biases logging enabled")
             wandb.init(project=self.project_name, name=self.run_name, config=self.config)
             self._wandb_initialized = True
-        else:
+        elif self.use_wandb:
             training_logger.warning(
                 "Weights & Biases not available - install with: pip install wandb"
             )
 
     def _finish_logging(self):
-        if self._wandb_initialized and _WANDB_AVAILABLE:
+        if self._wandb_initialized and self.use_wandb and _WANDB_AVAILABLE:
             wandb.finish()
             training_logger.success("Wandb run finished")
 
@@ -392,9 +393,13 @@ class PPOTrainer(Trainer):
             self.stats.push_reward(episode_reward)
 
             if self.episode_save_dir:
+                serializable_config = {
+                    key: (str(value) if isinstance(value, torch.dtype) else value)
+                    for key, value in self.config.items()
+                }
                 metadata = {
                     "env_config": self._env_metadata(),
-                    "training_config": self.config,
+                    "training_config": serializable_config,
                 }
                 output_path = self.stats.dump_episode_recording(
                     self.episode_save_dir,
