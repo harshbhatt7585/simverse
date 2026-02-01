@@ -133,13 +133,10 @@ class PPOTrainer(Trainer):
         }
 
     def _init_logging(self, title: str = "Training"):
-        """Initialize beautiful logging and wandb."""
-        # Beautiful header and config display
         training_logger.header(title)
         if self.config:
             training_logger.config(self.config)
 
-        # Initialize wandb
         if _WANDB_AVAILABLE:
             training_logger.info("Weights & Biases logging enabled")
             wandb.init(project=self.project_name, name=self.run_name, config=self.config)
@@ -150,7 +147,6 @@ class PPOTrainer(Trainer):
             )
 
     def _finish_logging(self):
-        """Finish wandb run."""
         if self._wandb_initialized and _WANDB_AVAILABLE:
             wandb.finish()
             training_logger.success("Wandb run finished")
