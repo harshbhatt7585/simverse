@@ -50,8 +50,8 @@ def train(use_wandb: bool = True):
     training_config = {
         "width": 30,
         "height": 20,
-        "num_agents": 8,
-        "max_steps": 150,
+        "num_agents": 4,
+        "max_steps": 500,
         "episodes": 100,
         "training_epochs": 10,
         "lr": 0.001,
