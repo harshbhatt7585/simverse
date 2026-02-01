@@ -755,9 +755,6 @@ class FarmtilaRender:
             title_text = "⏱ EPISODE ENDED ⏱"
             winner_name = f"Leader: Farmer {winner_id}"
         
-        # Animated scale for bounce effect
-        bounce = 1.0 + 0.1 * math.sin(self.winner_display_frames * 0.3) * max(0, 1 - self.winner_display_frames / 30)
-        
         # Draw banner background
         banner_width = int(game_width * 0.7)
         banner_height = int(self.cell_size * 6)
