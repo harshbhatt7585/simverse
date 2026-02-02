@@ -1,36 +1,35 @@
+from __future__ import annotations
+
 import multiprocessing as mp
-from dataclasses import dataclass
 from typing import Any, Dict
 
+from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.env import FarmtilaEnv
 from simverse.policies.simple import SimplePolicy
-from simverse.simulator import Simulator
 
 
-@dataclass
-class WorkerConfig:
-    worker_id: int
-    env_config: Dict[str, Any]
-    policy_state: Dict[str, Any]
+def env_worker(worker_id: int, config: Dict[str, Any], data_queue: mp.Queue) -> None:
+    """Runs a FarmtilaEnv and streams experiences back to the learner."""
+    farm_config = FarmtilaConfig(**config["env"])
+    env = FarmtilaEnv(farm_config)
+    policy = SimplePolicy(env.observation_space, env.action_space)
+    policy.load_state_dict(config["policy_state"])
 
-
-class Worker:
-    def __init__(self, config: WorkerConfig):
-        self.config = config
-        self.num_workers = config.num_workers
-        self.envs = {
-            worker_id: FarmtilaEnv(config.env_config)
-            for worker_id in range(self.config.num_workers)
-        }
-        self.policy = SimplePolicy(config.policy_state)
-
-    def run(self):
-        with mp.Pool(processes=self.config.num_workers) as pool:
-            results = pool.map(self._run_worker, range(self.config.num_workers))
-        return results
-
-    def _run_worker(self, worker_id: int) -> None:
-        env = self.envs[worker_id]
-        agents = self.env.agents
-        Simulator(env, agents, self.policy)
-        Simulator.run()
+    while True:
+        obs = env.get_observation()
+        # TODO: batch inference if policies are shared
+        actions = {agent.agent_id: policy(agent) for agent in env.agents}
+        next_obs, reward, done, info = env.step(actions)
+        data_queue.put(
+            {
+                "worker_id": worker_id,
+                "obs": obs,
+                "actions": actions,
+                "reward": reward,
+                "done": done,
+                "info": info,
+                "steps": 1,
+            }
+        )
+        if done:
+            env.reset()
