@@ -42,10 +42,55 @@ def parse_args() -> argparse.Namespace:
         default="on",
         help="Enable or disable Weights & Biases logging",
     )
+    parser.add_argument(
+        "--collector",
+        choices=["env", "parallel"],
+        default="env",
+        help="Select data-collection strategy",
+    )
+    parser.add_argument(
+        "--parallel-workers",
+        type=int,
+        default=24,
+        help="Number of parallel environment workers",
+    )
+    parser.add_argument(
+        "--parallel-queue-size",
+        type=int,
+        default=0,
+        help="Max size of the shared experience queue (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--parallel-warmup",
+        type=int,
+        default=None,
+        help="Optional warmup transitions before training starts",
+    )
+    parser.add_argument(
+        "--parallel-steps",
+        type=int,
+        default=None,
+        help="Transitions to gather per training iteration",
+    )
+    parser.add_argument(
+        "--parallel-timeout",
+        type=float,
+        default=5.0,
+        help="Queue wait timeout when collecting transitions",
+    )
     return parser.parse_args()
 
 
-def train(use_wandb: bool = True):
+def train(
+    *,
+    use_wandb: bool = True,
+    collector: str = "env",
+    parallel_workers: int = 24,
+    parallel_queue_size: int = 0,
+    parallel_warmup: int | None = None,
+    parallel_steps: int | None = None,
+    parallel_timeout: float = 5.0,
+):
     # Training hyperparameters
     training_config = {
         "width": 30,
@@ -64,6 +109,15 @@ def train(use_wandb: bool = True):
         "device": "cpu",
         "dtype": torch.float32,
     }
+    training_config["collector"] = collector
+    use_parallel_env = collector == "parallel"
+    if use_parallel_env:
+        training_config["parallel_env_workers"] = parallel_workers
+        training_config["parallel_env_queue_size"] = parallel_queue_size
+        if parallel_warmup is not None:
+            training_config["parallel_env_warmup_steps"] = parallel_warmup
+        if parallel_steps is not None:
+            training_config["parallel_env_steps_per_iteration"] = parallel_steps
 
     config = FarmtilaConfig(
         width=training_config["width"],
@@ -115,6 +169,14 @@ def train(use_wandb: bool = True):
         buffer_size=training_config["buffer_size"],
         dtype=training_config["dtype"],
         use_wandb=use_wandb,
+        use_parallel_env=use_parallel_env,
+        parallel_env_workers=parallel_workers,
+        parallel_env_queue_size=parallel_queue_size,
+        parallel_env_warmup_steps=parallel_warmup,
+        parallel_env_steps_per_iteration=parallel_steps,
+        parallel_env_timeout=parallel_timeout,
+        parallel_env_device=training_config["device"],
+        parallel_env_dtype=training_config["dtype"],
     )
 
     simulator = Simulator(
@@ -131,4 +193,12 @@ def train(use_wandb: bool = True):
 
 if __name__ == "__main__":
     cli_args = parse_args()
-    train(use_wandb=cli_args.wandb == "on")
+    train(
+        use_wandb=cli_args.wandb == "on",
+        collector=cli_args.collector,
+        parallel_workers=cli_args.parallel_workers,
+        parallel_queue_size=cli_args.parallel_queue_size,
+        parallel_warmup=cli_args.parallel_warmup,
+        parallel_steps=cli_args.parallel_steps,
+        parallel_timeout=cli_args.parallel_timeout,
+    )

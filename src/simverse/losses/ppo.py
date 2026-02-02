@@ -7,6 +7,7 @@ from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.trainer import Trainer
 from simverse.agent.stats import TrainingStats
 from simverse.logging_config import get_logger, training_logger
+from simverse.utils.parallel_env_runner import ParallelEnvRunner
 from simverse.utils.replay_buffer import Experience, ReplayBuffer
 
 try:
@@ -42,6 +43,15 @@ class PPOTrainer(Trainer):
         buffer_size: int = DEFAULT_BUFFER_SIZE,
         dtype: torch.dtype = torch.float32,
         use_wandb: bool = True,
+        use_parallel_env: bool = False,
+        parallel_env_workers: int = 4,
+        parallel_env_queue_size: int = 0,
+        parallel_env_start_method: Optional[str] = None,
+        parallel_env_warmup_steps: Optional[int] = None,
+        parallel_env_steps_per_iteration: Optional[int] = None,
+        parallel_env_timeout: float = 5.0,
+        parallel_env_device: Optional[str] = None,
+        parallel_env_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
 
@@ -71,6 +81,25 @@ class PPOTrainer(Trainer):
         self.device = torch.device(device)
         self.batch_size = batch_size
         self.dtype = dtype
+        warmup_default = max(buffer_size // 4, batch_size)
+        steps_default = max(batch_size, 1)
+        warmup_value = (
+            warmup_default if parallel_env_warmup_steps is None else parallel_env_warmup_steps
+        )
+        steps_value = (
+            steps_default
+            if parallel_env_steps_per_iteration is None
+            else parallel_env_steps_per_iteration
+        )
+        self.use_parallel_env = use_parallel_env
+        self.parallel_env_workers = max(1, parallel_env_workers)
+        self.parallel_env_queue_size = parallel_env_queue_size
+        self.parallel_env_start_method = parallel_env_start_method
+        self.parallel_env_timeout = parallel_env_timeout
+        self.parallel_env_device = parallel_env_device or "cpu"
+        self.parallel_env_dtype = parallel_env_dtype or dtype
+        self.parallel_env_warmup_steps = max(0, warmup_value)
+        self.parallel_env_steps_per_iteration = max(1, steps_value)
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -203,6 +232,61 @@ class PPOTrainer(Trainer):
 
         return torch.tensor(advantages, dtype=torch.float32)
 
+    def _prepare_observation(self, observation: Any) -> torch.Tensor:
+        if isinstance(observation, torch.Tensor):
+            obs_tensor = observation.detach()
+        else:
+            obs_tensor = torch.as_tensor(observation, dtype=self.dtype)
+        if obs_tensor.dim() == 3:
+            obs_tensor = obs_tensor.unsqueeze(0)
+        return obs_tensor.to(self.device, dtype=self.dtype)
+
+    def _prepare_action(self, action: Any) -> torch.Tensor:
+        if isinstance(action, torch.Tensor):
+            action_tensor = action.detach()
+        else:
+            action_tensor = torch.as_tensor(action, dtype=torch.long)
+        return action_tensor.to(self.device)
+
+    def _prepare_log_prob(self, log_prob: Any) -> torch.Tensor:
+        if isinstance(log_prob, torch.Tensor):
+            log_prob_tensor = log_prob.detach()
+        else:
+            log_prob_tensor = torch.as_tensor(log_prob, dtype=self.dtype)
+        return log_prob_tensor.to(self.device, dtype=self.dtype)
+
+    def _value_to_float(self, value: Any) -> float:
+        if isinstance(value, torch.Tensor):
+            return float(value.detach().cpu().squeeze().item())
+        if hasattr(value, "item"):
+            try:
+                return float(value.item())
+            except (TypeError, ValueError):
+                return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _done_to_bool(self, done: Any) -> bool:
+        if isinstance(done, torch.Tensor):
+            return bool(done.detach().cpu().item())
+        return bool(done)
+
+    def _extract_reward(self, reward: Any) -> float:
+        if isinstance(reward, dict):
+            total = 0.0
+            for value in reward.values():
+                try:
+                    total += float(value)
+                except (TypeError, ValueError):
+                    continue
+            return total
+        try:
+            return float(reward)
+        except (TypeError, ValueError):
+            return 0.0
+
     def train(
         self,
         env: SimEnv,
@@ -216,6 +300,10 @@ class PPOTrainer(Trainer):
 
         self._init_logging(title)
         training_logger.success("Environment and policies initialized")
+
+        if self.use_parallel_env:
+            self._train_with_parallel_env_loop()
+            return
 
         training_logger.start_training(self.episodes)
         training_start = time.perf_counter()
@@ -325,79 +413,7 @@ class PPOTrainer(Trainer):
             print()
 
             # TRAINING PHASE (MODEL UPDATE)
-            for agent in self.agents:
-                agent.policy.train()
-
-                for epoch in range(self.training_epochs):
-                    # Sample a batch of experiences (trajectory)
-                    trajectory = self.replay_buffer.sample_for_agent(
-                        agent.agent_id, self.batch_size
-                    )
-                    if not trajectory:
-                        break
-
-                    # Extract trajectory data as lists
-                    observations = [exp.observation for exp in trajectory]
-                    actions = [exp.action for exp in trajectory]
-                    rewards = [
-                        sum(exp.reward.values()) if isinstance(exp.reward, dict) else exp.reward
-                        for exp in trajectory
-                    ]
-                    values = [exp.value.squeeze().item() for exp in trajectory]
-                    dones = [
-                        exp.done if isinstance(exp.done, bool) else bool(exp.done)
-                        for exp in trajectory
-                    ]
-
-                    # Get next value for bootstrap (from last observation)
-                    with torch.no_grad():
-                        _, next_value = agent.policy(observations[-1])
-                        next_value = next_value.squeeze().item()
-
-                    # Compute advantages for the trajectory
-                    advantages = self.compute_gae(rewards, values, next_value, dones).to(
-                        self.device
-                    )
-
-                    # Compute returns (advantages + values)
-                    returns = advantages + torch.tensor(
-                        values, dtype=self.dtype, device=self.device
-                    )
-
-                    # PPO update for each step in trajectory
-                    for i, exp in enumerate(trajectory):
-                        logits, value = agent.policy(exp.observation)
-                        dist = torch.distributions.Categorical(logits=logits)
-                        log_prob = dist.log_prob(exp.action)
-
-                        ratio = torch.exp(log_prob - exp.log_prob)
-
-                        adv = advantages[i]
-                        surr1 = ratio * adv
-                        surr2 = (
-                            torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * adv
-                        )
-                        policy_loss = -torch.min(surr1, surr2).mean()
-
-                        value_loss = 0.5 * (returns[i] - value.squeeze()).pow(2).mean()
-
-                        loss = policy_loss + 0.5 * value_loss
-
-                        optimizer = self._get_optimizer(agent.agent_id)
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-
-                    # Beautiful epoch logging
-                    training_logger.log_epoch(
-                        epoch, self.training_epochs, policy_loss.item(), value_loss.item()
-                    )
-
-                    # Track and log losses (per agent)
-                    self.stats.push_agent_losses(
-                        agent.agent_id, policy_loss.item(), value_loss.item()
-                    )
-                    self.stats.log_wandb(step=self.stats.steps)
+            self._train_from_replay_buffer()
 
             avg_reward = episode_reward / max(self.env.config.max_steps, 1)
             training_logger.end_episode(
@@ -440,4 +456,224 @@ class PPOTrainer(Trainer):
             }
         )
 
+        self._finish_logging()
+
+    def _train_from_replay_buffer(self) -> None:
+        for agent in self.agents:
+            policy = getattr(agent, "policy", None)
+            if policy is None:
+                continue
+            policy.train()
+
+            for epoch in range(self.training_epochs):
+                trajectory = self.replay_buffer.sample_for_agent(agent.agent_id, self.batch_size)
+                if not trajectory:
+                    break
+
+                observations = [self._prepare_observation(exp.observation) for exp in trajectory]
+                actions = [self._prepare_action(exp.action) for exp in trajectory]
+                rewards = [self._extract_reward(exp.reward) for exp in trajectory]
+                values = [self._value_to_float(exp.value) for exp in trajectory]
+                dones = [self._done_to_bool(exp.done) for exp in trajectory]
+                log_probs_old = [self._prepare_log_prob(exp.log_prob) for exp in trajectory]
+
+                with torch.no_grad():
+                    _, next_value_tensor = policy(observations[-1])
+                    next_value = self._value_to_float(next_value_tensor)
+
+                advantages = self.compute_gae(rewards, values, next_value, dones).to(self.device)
+                returns = advantages + torch.tensor(values, dtype=self.dtype, device=self.device)
+
+                optimizer = self._get_optimizer(agent.agent_id)
+                policy_loss_value = torch.tensor(0.0, device=self.device)
+                value_loss_value = torch.tensor(0.0, device=self.device)
+
+                for i in range(len(trajectory)):
+                    logits, value = policy(observations[i])
+                    dist = torch.distributions.Categorical(logits=logits)
+                    log_prob = dist.log_prob(actions[i])
+                    ratio = torch.exp(log_prob - log_probs_old[i])
+
+                    adv = advantages[i]
+                    surr1 = ratio * adv
+                    surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * adv
+                    policy_loss_value = -torch.min(surr1, surr2).mean()
+
+                    value_loss_value = 0.5 * (returns[i] - value.squeeze()).pow(2).mean()
+                    loss = policy_loss_value + 0.5 * value_loss_value
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                training_logger.log_epoch(
+                    epoch, self.training_epochs, policy_loss_value.item(), value_loss_value.item()
+                )
+                self.stats.push_agent_losses(
+                    agent.agent_id, policy_loss_value.item(), value_loss_value.item()
+                )
+                self.stats.log_wandb(step=self.stats.steps)
+
+    def _collect_policy_states(self) -> Dict[int, Dict[str, Any]]:
+        states: Dict[int, Dict[str, Any]] = {}
+        for agent in getattr(self, "agents", []):
+            policy = getattr(agent, "policy", None)
+            if policy is None:
+                continue
+            states[agent.agent_id] = policy.state_dict()
+        if not states:
+            raise RuntimeError("No policy states available for parallel env runner")
+        return states
+
+    def _serialize_env_config(self) -> Dict[str, Any]:
+        env = getattr(self, "env", None)
+        if env is None:
+            raise RuntimeError("Trainer has no environment bound")
+        config = getattr(env, "config", None)
+        if config is None:
+            raise RuntimeError("Environment is missing configuration for parallel runner")
+        config_dict = dict(vars(config))
+        config_dict.pop("policies", None)
+        return config_dict
+
+    def _train_with_parallel_env_loop(self) -> None:
+        runner = ParallelEnvRunner(
+            num_workers=self.parallel_env_workers,
+            env_config=self._serialize_env_config(),
+            policy_state=self._collect_policy_states(),
+            device=self.parallel_env_device,
+            dtype=self.parallel_env_dtype,
+            queue_maxsize=self.parallel_env_queue_size,
+            start_method=self.parallel_env_start_method,
+        )
+
+        training_logger.info(
+            "Starting parallel collector with %s workers (start=%s)"
+            % (self.parallel_env_workers, runner.start_method)
+        )
+
+        payload_counter = {"count": 0, "transitions": 0}
+        rate_tracker = {
+            "last_log_time": time.perf_counter(),
+            "last_transitions": 0,
+            "last_payloads": 0,
+        }
+        phase_state = {
+            "active": False,
+            "target": 1,
+            "collected": 0,
+            "label": "Collector",
+            "last_ratio": -0.05,
+        }
+
+        def _start_collection_phase(target: int, label: str) -> None:
+            if target <= 0:
+                phase_state["active"] = False
+                return
+            phase_state["active"] = True
+            phase_state["target"] = max(1, target)
+            phase_state["collected"] = 0
+            phase_state["label"] = label
+            phase_state["last_ratio"] = -0.05
+            rate_tracker["last_log_time"] = time.perf_counter()
+            rate_tracker["last_payloads"] = payload_counter["count"]
+            rate_tracker["last_transitions"] = payload_counter["transitions"]
+            training_logger.info(f"{label}: collecting {phase_state['target']} agent-steps")
+
+        def payload_hook(payload: Dict[str, Any]) -> None:
+            self.stats.step()
+            payload_counter["count"] += 1
+            transitions = len(payload.get("collected_data", []))
+            payload_counter["transitions"] += transitions
+            worker_id = payload.get("worker_id")
+            episode_step = payload.get("episode_step")
+            done = payload.get("done")
+            if phase_state["active"]:
+                phase_state["collected"] += transitions
+                now = time.perf_counter()
+                elapsed = max(now - rate_tracker["last_log_time"], 1e-6)
+                payload_delta = payload_counter["count"] - rate_tracker["last_payloads"]
+                trans_delta = payload_counter["transitions"] - rate_tracker["last_transitions"]
+                ratio = phase_state["collected"] / max(phase_state["target"], 1)
+                if ratio >= 1.0 or ratio - phase_state["last_ratio"] >= 0.05 or elapsed >= 2.0:
+                    training_logger.log_step(
+                        min(int(phase_state["collected"]), int(phase_state["target"])),
+                        int(phase_state["target"]),
+                        {
+                            "agent_steps/s": trans_delta / elapsed,
+                            "payloads/s": payload_delta / elapsed,
+                        },
+                    )
+                    phase_state["last_ratio"] = ratio
+                    rate_tracker["last_log_time"] = now
+                    rate_tracker["last_payloads"] = payload_counter["count"]
+                    rate_tracker["last_transitions"] = payload_counter["transitions"]
+            if done:
+                training_logger.info(
+                    "Collector episode done: worker=%s steps=%s" % (worker_id, episode_step)
+                )
+
+        def collect_transitions(target: int, label: str) -> None:
+            if target <= 0:
+                return
+            _start_collection_phase(target, label)
+            try:
+                runner.pump_replay_buffer(
+                    buffer=self.replay_buffer,
+                    min_transitions=target,
+                    timeout=self.parallel_env_timeout,
+                    on_experience=self.stats.push_experience,
+                    on_payload=payload_hook,
+                )
+            finally:
+                phase_state["active"] = False
+                print()
+
+        training_logger.start_training(self.episodes)
+        with runner:
+            if self.parallel_env_warmup_steps > 0:
+                collect_transitions(
+                    self.parallel_env_warmup_steps,
+                    "Warmup collection",
+                )
+                self.stats.reset_episode()
+
+            for episode in range(self.episodes):
+                training_logger.start_episode(episode + 1)
+                self.stats.reset_episode()
+
+                collect_transitions(
+                    self.parallel_env_steps_per_iteration,
+                    f"Episode {episode + 1} rollout",
+                )
+
+                episode_reward = sum(self.stats.step_rewards)
+                avg_reward = (
+                    episode_reward / max(len(self.stats.step_rewards), 1)
+                    if self.stats.step_rewards
+                    else 0.0
+                )
+                self.stats.push_reward(episode_reward)
+
+                self._train_from_replay_buffer()
+                runner.set_policy_state(self._collect_policy_states(), restart=True)
+
+                training_logger.end_episode(
+                    episode + 1,
+                    total_reward=episode_reward,
+                    avg_reward=avg_reward,
+                    steps=self.parallel_env_steps_per_iteration,
+                )
+                self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
+
+        training_logger.finish(
+            {
+                "avg_episode_reward": sum(self.stats.episode_rewards)
+                / max(len(self.stats.episode_rewards), 1),
+                "final_policy_loss": self.stats.policy_losses[-1]
+                if self.stats.policy_losses
+                else 0.0,
+                "final_value_loss": self.stats.value_losses[-1] if self.stats.value_losses else 0.0,
+            }
+        )
         self._finish_logging()

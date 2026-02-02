@@ -34,6 +34,13 @@ class ReplayBuffer:
     def add(self, experience: Experience) -> None:
         self.buffer.append(experience)
 
+    def extend(self, experiences: List[Experience]) -> int:
+        count = 0
+        for exp in experiences:
+            self.add(exp)
+            count += 1
+        return count
+
     def sample(self, batch_size: int) -> List[Experience]:
         return random.sample(self.buffer, min(len(self.buffer), batch_size))
 
@@ -44,3 +51,6 @@ class ReplayBuffer:
         if len(agent_experiences) <= batch_size:
             return agent_experiences.copy()
         return random.sample(agent_experiences, batch_size)
+
+    def __len__(self) -> int:
+        return len(self.buffer)
