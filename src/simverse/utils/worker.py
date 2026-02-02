@@ -1,3 +1,4 @@
+import multiprocessing as mp
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -20,3 +21,8 @@ class Worker:
 
     def _build_envs(self, num_envs: int) -> List[FarmtilaEnv]:
         return [FarmtilaEnv(self.config.env_config) for _ in range(num_envs)]
+
+    def run(self):
+        with mp.Pool(processes=self.config.num_workers) as pool:
+            results = pool.map(self._run_worker, range(self.config.num_workers))
+        return results
