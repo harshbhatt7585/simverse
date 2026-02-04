@@ -6,13 +6,22 @@ import argparse
 import time
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Protocol, Tuple
 
 import torch
 
 warnings.filterwarnings("ignore", message=".*pynvml.*", category=FutureWarning, module="torch.cuda")
 
 OBS_DIM = 16
+
+
+ObservationDict = Dict[str, torch.Tensor]
+
+
+class Policy(Protocol):
+    """Callable signature shared by the toy policy classes below."""
+
+    def __call__(self, obs_batch: torch.Tensor) -> torch.Tensor: ...
 
 
 @dataclass
@@ -31,7 +40,7 @@ class VectorizedEnvBatch:
         self.env_ids = env_ids.view(self.num_envs, 1, 1).expand(-1, self.num_agents, 1)
         self.time = torch.zeros(self.num_envs, 1, device=self.device)
 
-    def _obs(self) -> Dict[str, torch.Tensor]:
+    def _obs(self) -> ObservationDict:
         repeated_time = self.time.view(self.num_envs, 1, 1).expand(-1, self.num_agents, -1)
         return {
             "state": self.state.clone(),
@@ -41,14 +50,14 @@ class VectorizedEnvBatch:
             "env_id": self.env_ids.clone(),
         }
 
-    def reset(self) -> Dict[str, torch.Tensor]:
+    def reset(self) -> ObservationDict:
         self.state = torch.randn_like(self.state)
         self.prev_actions.zero_()
         self.health.fill_(1.0)
         self.time.zero_()
         return self._obs()
 
-    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, bool]:
+    def step(self, actions: torch.Tensor) -> Tuple[ObservationDict, torch.Tensor, bool]:
         noise = 0.05 * torch.randn_like(self.state)
         self.state = self.state + actions + noise
         self.prev_actions = actions.clone()
@@ -66,7 +75,7 @@ class AsyncVectorizedEnv:
         self.batch = VectorizedEnvBatch(num_envs, num_agents, device)
         self._pending_actions: Optional[torch.Tensor] = None
 
-    def reset(self) -> Dict[str, torch.Tensor]:
+    def reset(self) -> ObservationDict:
         self._pending_actions = None
         return self.batch.reset()
 
@@ -75,7 +84,7 @@ class AsyncVectorizedEnv:
             raise RuntimeError("step_async called before previous step_wait")
         self._pending_actions = actions
 
-    def step_wait(self) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, bool]:
+    def step_wait(self) -> Tuple[ObservationDict, torch.Tensor, bool]:
         if self._pending_actions is None:
             raise RuntimeError("step_wait called without pending actions")
         obs, reward, done = self.batch.step(self._pending_actions)
@@ -118,7 +127,7 @@ class SinusoidPolicy:
         return torch.sin(obs_batch + self.phase) * torch.tanh(self.scale)
 
 
-def build_policy(agent_id: int) -> object:
+def build_policy(agent_id: int) -> Policy:
     if agent_id % 3 == 0:
         return LinearPolicy(OBS_DIM, seed=agent_id)
     if agent_id % 3 == 1:
@@ -127,7 +136,7 @@ def build_policy(agent_id: int) -> object:
     return SinusoidPolicy(OBS_DIM, seed=agent_id)
 
 
-def policy_to_device(policy: object, device: torch.device) -> object:
+def policy_to_device(policy: Policy, device: torch.device) -> Policy:
     for name, value in vars(policy).items():
         if isinstance(value, torch.Tensor):
             setattr(policy, name, value.to(device))
@@ -172,7 +181,9 @@ def run_async_vectorized_demo(
     # Initialize
     start_time = time.perf_counter()
     env = AsyncVectorizedEnv(num_envs, num_agents, device)
-    policies = [policy_to_device(build_policy(agent_id), device) for agent_id in range(num_agents)]
+    policies: List[Policy] = [
+        policy_to_device(build_policy(agent_id), device) for agent_id in range(num_agents)
+    ]
 
     print("\n📋 Policy Configuration:")
     policy_counts: Dict[str, int] = {}
@@ -188,6 +199,7 @@ def run_async_vectorized_demo(
     last_ts = time.perf_counter()
     total_steps = 0
     total_time = 0.0
+    avg_throughput = 0.0
     step_times: List[float] = []
     step_throughputs: List[float] = []
 
@@ -257,12 +269,19 @@ def run_async_vectorized_demo(
     print("\n" + "─" * 70)
     print("📈 Summary Statistics")
     print("─" * 70)
-    print(f"  Total agent-steps: {total_steps:,}")
+
+    if not step_times:
+        print("  No rollout steps executed.")
+        print("=" * 70 + "\n")
+        return
+
+    avg_step_ms = sum(step_times) / len(step_times) * 1000
+    print(f"  Total agent-steps: {_format_number(float(total_steps))}")
     print(f"  Total wall time: {total_wall_time:.3f}s")
-    print(f"  Average throughput: {avg_throughput:,.1f} agent-steps/s")
-    print(f"  Peak throughput: {max(step_throughputs):,.1f} agent-steps/s")
-    print(f"  Min throughput: {min(step_throughputs):,.1f} agent-steps/s")
-    print(f"  Average step time: {sum(step_times) / len(step_times) * 1000:.2f}ms")
+    print(f"  Average throughput: {_format_number(avg_throughput)} agent-steps/s")
+    print(f"  Peak throughput: {_format_number(max(step_throughputs))} agent-steps/s")
+    print(f"  Min throughput: {_format_number(min(step_throughputs))} agent-steps/s")
+    print(f"  Average step time: {avg_step_ms:.2f}ms")
     print(f"  Min step time: {min(step_times) * 1000:.2f}ms")
     print(f"  Max step time: {max(step_times) * 1000:.2f}ms")
     print("=" * 70 + "\n")
