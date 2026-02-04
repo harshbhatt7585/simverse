@@ -134,48 +134,138 @@ def policy_to_device(policy: object, device: torch.device) -> object:
     return policy
 
 
+def _format_number(num: float, precision: int = 2) -> str:
+    """Format number with appropriate units."""
+    if num >= 1e6:
+        return f"{num / 1e6:.{precision}f}M"
+    if num >= 1e3:
+        return f"{num / 1e3:.{precision}f}K"
+    return f"{num:.{precision}f}"
+
+
+def _progress_bar(current: int, total: int, width: int = 30) -> str:
+    """Generate a progress bar string."""
+    filled = int(width * current / max(total, 1))
+    bar = "█" * filled + "░" * (width - filled)
+    percent = 100 * current / max(total, 1)
+    return f"{bar} {percent:.1f}%"
+
+
 def run_async_vectorized_demo(
     num_envs: int,
     num_agents: int,
     rollout_steps: int,
     device: torch.device,
 ) -> None:
+    # Header
+    print("\n" + "=" * 70)
+    print("🚀 Async Vectorized Environment Demo")
+    print("=" * 70)
+    print(f"  Environments: {num_envs}")
+    print(f"  Agents per env: {num_agents}")
+    print(f"  Total agents: {num_envs * num_agents}")
+    print(f"  Rollout steps: {rollout_steps}")
+    print(f"  Device: {device}")
+    print(f"  Observation dim: {OBS_DIM}")
+    print("=" * 70)
+
+    # Initialize
+    start_time = time.perf_counter()
     env = AsyncVectorizedEnv(num_envs, num_agents, device)
     policies = [policy_to_device(build_policy(agent_id), device) for agent_id in range(num_agents)]
-    print("Assigned policies:")
+
+    print("\n📋 Policy Configuration:")
+    policy_counts: Dict[str, int] = {}
     for agent_id, policy in enumerate(policies):
-        print(f"  Agent {agent_id}: {policy.__class__.__name__}")
+        policy_name = policy.__class__.__name__
+        policy_counts[policy_name] = policy_counts.get(policy_name, 0) + 1
+        print(f"  Agent {agent_id:2d}: {policy_name}")
+    print("\n📊 Policy Distribution:")
+    for policy_name, count in sorted(policy_counts.items()):
+        print(f"  {policy_name:20s}: {count:2d} agents")
 
     obs = env.reset()
     last_ts = time.perf_counter()
     total_steps = 0
     total_time = 0.0
-    for step in range(rollout_steps):
-        state_obs = obs["state"]  # [num_envs, num_agents, obs_dim]
-        agents_obs = state_obs.permute(1, 2, 0)
-        print(f"Step {step}: agents_obs shape {agents_obs.shape}")
+    step_times: List[float] = []
+    step_throughputs: List[float] = []
 
+    print("\n" + "─" * 70)
+    print("🔄 Running Rollout...")
+    print("─" * 70)
+
+    for step in range(rollout_steps):
+        step_start = time.perf_counter()
+        state_obs = obs["state"]  # [num_envs, num_agents, obs_dim]
+
+        # Policy inference
+        inference_start = time.perf_counter()
         per_agent_actions: List[torch.Tensor] = []
         for agent_id, policy in enumerate(policies):
             obs_for_agent = state_obs[:, agent_id, :]
             actions = policy(obs_for_agent)
             per_agent_actions.append(actions)
+        inference_time = time.perf_counter() - inference_start
 
         batched_actions = torch.stack(per_agent_actions, dim=1)
-        env.step_async(batched_actions)
-        obs, _, _ = env.step_wait()
 
+        # Environment step
+        env_start = time.perf_counter()
+        env.step_async(batched_actions)
+        obs, rewards, done = env.step_wait()
+        env_time = time.perf_counter() - env_start
+
+        # Timing
         now = time.perf_counter()
-        elapsed = max(now - last_ts, 1e-6)
+        step_elapsed = now - step_start
+        total_elapsed = now - last_ts
         total_steps += num_envs * num_agents
-        total_time += elapsed
-        agent_steps_per_sec = (num_envs * num_agents) / elapsed
-        avg_steps = total_steps / max(total_time, 1e-6)
+        total_time += total_elapsed
+        step_times.append(step_elapsed)
+
+        agent_steps_per_sec = (num_envs * num_agents) / max(total_elapsed, 1e-6)
+        step_throughputs.append(agent_steps_per_sec)
+        avg_throughput = total_steps / max(total_time, 1e-6)
+
+        # Progress bar
+        progress = _progress_bar(step + 1, rollout_steps)
+
+        # Log step details
+        reward_mean = rewards.mean().item() if isinstance(rewards, torch.Tensor) else float(rewards)
+        reward_std = rewards.std().item() if isinstance(rewards, torch.Tensor) else 0.0
+
         print(
-            f"Step {step}: actions shape {batched_actions.shape} | "
-            f"{agent_steps_per_sec:.1f} agent-steps/sec (avg {avg_steps:.1f})"
+            f"Step {step + 1:3d}/{rollout_steps} │ {progress} │ "
+            f"Throughput: {agent_steps_per_sec:7.1f} agent-steps/s │ "
+            f"Avg: {avg_throughput:7.1f} agent-steps/s"
         )
+        print(
+            f"  ├─ Inference: {inference_time * 1000:6.2f}ms │ "
+            f"Env step: {env_time * 1000:6.2f}ms │ "
+            f"Total: {step_elapsed * 1000:6.2f}ms"
+        )
+        print(
+            f"  ├─ Reward: mean={reward_mean:7.3f}, std={reward_std:7.3f} │ "
+            f"Actions shape: {list(batched_actions.shape)}"
+        )
+
         last_ts = now
+
+    # Summary
+    total_wall_time = time.perf_counter() - start_time
+    print("\n" + "─" * 70)
+    print("📈 Summary Statistics")
+    print("─" * 70)
+    print(f"  Total agent-steps: {total_steps:,}")
+    print(f"  Total wall time: {total_wall_time:.3f}s")
+    print(f"  Average throughput: {avg_throughput:,.1f} agent-steps/s")
+    print(f"  Peak throughput: {max(step_throughputs):,.1f} agent-steps/s")
+    print(f"  Min throughput: {min(step_throughputs):,.1f} agent-steps/s")
+    print(f"  Average step time: {sum(step_times) / len(step_times) * 1000:.2f}ms")
+    print(f"  Min step time: {min(step_times) * 1000:.2f}ms")
+    print(f"  Max step time: {max(step_times) * 1000:.2f}ms")
+    print("=" * 70 + "\n")
 
 
 def parse_args() -> argparse.Namespace:
@@ -196,7 +286,7 @@ if __name__ == "__main__":
     args = parse_args()
     requested_device = args.device
     if requested_device == "mps" and not torch.backends.mps.is_available():
-        print("MPS requested but not available; falling back to CPU")
+        print("⚠️  MPS requested but not available; falling back to CPU")
         requested_device = "cpu"
     device = torch.device(requested_device)
     run_async_vectorized_demo(
