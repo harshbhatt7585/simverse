@@ -328,7 +328,8 @@ class PPOTrainer(Trainer):
         training_start = time.perf_counter()
         paused_time = 0.0
         last_active_time = 0.0
-        last_total_steps = 0
+        total_agent_steps = 0
+        last_logged_steps = 0
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
@@ -337,6 +338,7 @@ class PPOTrainer(Trainer):
             obs = self.env.reset()
             self.env_batch_size = self._batch_size_from_obs(obs)
             episode_reward = 0.0
+            episode_agent_steps = 0
 
             for step in range(self.env.config.max_steps):
                 obs_tensor = self._prepare_obs_tensor(obs)
@@ -414,14 +416,17 @@ class PPOTrainer(Trainer):
 
                 episode_reward += float(reward_array.sum())
 
-                if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
+                steps_this_iter = batch_envs * max(len(self.agents), 1)
+                episode_agent_steps += steps_this_iter
+                total_agent_steps += steps_this_iter
+
+                if (step + 1) % 100 == 0 or step == self.env.config.max_steps - 1:
                     active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
-                    total_steps_done = (episode * self.env.config.max_steps + step + 1) * batch_envs
-                    delta_steps = total_steps_done - last_total_steps
+                    delta_steps = total_agent_steps - last_logged_steps
                     delta_time = max(active_time - last_active_time, 1e-8)
                     steps_per_sec = delta_steps / delta_time
                     last_active_time = active_time
-                    last_total_steps = total_steps_done
+                    last_logged_steps = total_agent_steps
                     training_logger.log_step(
                         step + 1,
                         self.env.config.max_steps,
@@ -511,13 +516,12 @@ class PPOTrainer(Trainer):
                     )
                     self.stats.log_wandb(step=self.stats.steps)
 
-            total_env_steps = self.env.config.max_steps * max(self.env_batch_size, 1)
-            avg_reward = episode_reward / max(total_env_steps, 1)
+            avg_reward = episode_reward / max(episode_agent_steps, 1)
             training_logger.end_episode(
                 episode + 1,
                 total_reward=episode_reward,
                 avg_reward=avg_reward,
-                steps=total_env_steps,
+                steps=episode_agent_steps,
             )
 
             self.stats.push_reward(episode_reward)
