@@ -286,7 +286,24 @@ class FarmtillaVectorizedEnv(SimEnv):
         return [env.reset() for env in self.envs]
 
     def step(self, actions: List[List[int]]):
-        return [env.step(actions[i]) for i, env in enumerate(self.envs)]
+        obs_list, reward_list, done_list, info_list = [], [], [], []
 
-    def get_observation(self):
-        return [env.get_observation() for env in self.envs]
+        for env, action in zip(self.envs, actions):
+            self._normalize_actions(action)
+            obs, reward, done, info = env.step(action)
+            obs_list.append(obs)
+            reward_list.append(reward)
+            done_list.append(done)
+            info_list.append(info)
+
+        obs_list = np.stack(obs_list, axis=0)
+        reward_list = np.stack(reward_list, axis=0)
+        done_list = np.stack(done_list, axis=0)
+        info_list = np.stack(info_list, axis=0)
+
+        return {
+            "obs": obs_list,
+            "reward": reward_list,
+            "done": done_list,
+            "info": info_list,
+        }
