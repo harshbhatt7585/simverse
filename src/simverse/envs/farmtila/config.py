@@ -7,6 +7,7 @@ class FarmtilaConfig:
     width: int = 50
     height: int = 50
     num_agents: int = 5
+    num_envs: int = 1
     spawn_seed_every: int = 100
     seeds_per_spawn: int = 10
     max_steps: int = 10000
