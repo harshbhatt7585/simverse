@@ -1,3 +1,4 @@
+import random
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -337,6 +338,12 @@ class PPOTrainer(Trainer):
 
             obs = self.env.reset()
             self.env_batch_size = self._batch_size_from_obs(obs)
+            self.stats.set_env_count(self.env_batch_size)
+            record_env_idx: Optional[int]
+            if self.episode_save_dir:
+                record_env_idx = random.randrange(max(self.env_batch_size, 1))
+            else:
+                record_env_idx = None
             episode_reward = 0.0
             episode_agent_steps = 0
 
@@ -377,19 +384,19 @@ class PPOTrainer(Trainer):
                 done_array = self._done_to_array(done, batch_envs)
                 info_list = self._ensure_info_list(info, batch_envs)
 
-                if self.episode_save_dir:
-                    for env_idx in range(batch_envs):
-                        frame_obs = self._extract_env_observation(obs, env_idx)
-                        frame_reward = self._reward_row_to_dict(reward_array[env_idx])
-                        frame_record = self._build_frame_record(
-                            frame_obs,
-                            actions_per_env[env_idx],
-                            frame_reward,
-                            info_list[env_idx],
-                            step + 1,
-                            bool(done_array[env_idx]),
-                        )
-                        self.stats.record_frame(frame_record)
+                if self.episode_save_dir and record_env_idx is not None:
+                    env_to_record = min(record_env_idx, batch_envs - 1)
+                    frame_obs = self._extract_env_observation(obs, env_to_record)
+                    frame_reward = self._reward_row_to_dict(reward_array[env_to_record])
+                    frame_record = self._build_frame_record(
+                        frame_obs,
+                        actions_per_env[env_to_record],
+                        frame_reward,
+                        info_list[env_to_record],
+                        step + 1,
+                        bool(done_array[env_to_record]),
+                    )
+                    self.stats.record_frame(frame_record)
 
                 for env_idx in range(batch_envs):
                     env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
