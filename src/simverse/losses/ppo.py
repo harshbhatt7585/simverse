@@ -1,7 +1,6 @@
 import time
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
 import torch
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.simenv import SimEnv
@@ -72,7 +71,6 @@ class PPOTrainer(Trainer):
         self.device = torch.device(device)
         self.batch_size = batch_size
         self.dtype = dtype
-        self.env_batch_size = 1
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -149,111 +147,6 @@ class PPOTrainer(Trainer):
             "done": bool(done),
         }
 
-    def _obs_batch_array(self, observation: Dict[str, Any]) -> np.ndarray:
-        obs_array = observation.get("obs")
-        if isinstance(obs_array, np.ndarray):
-            arr = obs_array
-        else:
-            arr = np.asarray(obs_array)
-        if arr.ndim == 3:
-            arr = np.expand_dims(arr, axis=0)
-        return arr
-
-    def _prepare_obs_tensor(self, observation: Dict[str, Any]) -> torch.Tensor:
-        obs_array = self._obs_batch_array(observation)
-        return torch.from_numpy(obs_array).to(self.dtype).to(self.device)
-
-    def _batch_size_from_obs(self, observation: Dict[str, Any]) -> int:
-        return int(self._obs_batch_array(observation).shape[0])
-
-    def _reward_to_array(self, reward: Any, batch_size: int) -> np.ndarray:
-        if isinstance(reward, np.ndarray):
-            return reward.astype(np.float32, copy=False)
-
-        reward_array = np.zeros((batch_size, self.env.config.num_agents), dtype=np.float32)
-
-        def _assign(row_idx: int, value: Any) -> None:
-            if isinstance(value, dict):
-                for agent_id, agent_reward in value.items():
-                    reward_array[row_idx, int(agent_id)] = float(agent_reward)
-            else:
-                reward_array[row_idx, :] = float(value)
-
-        if isinstance(reward, list):
-            for row_idx, value in enumerate(reward[:batch_size]):
-                _assign(row_idx, value)
-        else:
-            _assign(0, reward)
-
-        return reward_array
-
-    def _done_to_array(self, done: Any, batch_size: int) -> np.ndarray:
-        if isinstance(done, np.ndarray):
-            return done.astype(np.bool_, copy=False)
-        if isinstance(done, (list, tuple)):
-            return np.asarray(done, dtype=np.bool_)
-        done_array = np.zeros(batch_size, dtype=np.bool_)
-        done_array[:] = bool(done)
-        return done_array
-
-    def _ensure_info_list(self, info: Any, batch_size: int) -> List[Dict[str, Any]]:
-        if isinstance(info, list):
-            if len(info) == batch_size:
-                return info
-            if len(info) == 1:
-                return info * batch_size
-            padded = list(info)
-            while len(padded) < batch_size:
-                padded.append({})
-            return padded[:batch_size]
-        if isinstance(info, dict):
-            return [dict(info) for _ in range(batch_size)]
-        return [{} for _ in range(batch_size)]
-
-    def _extract_env_observation(self, observation: Dict[str, Any], env_idx: int) -> Dict[str, Any]:
-        obs_array = self._obs_batch_array(observation)
-        env_obs = obs_array[env_idx]
-
-        agents_field = observation.get("agents", [])
-        env_agents: Any
-        if agents_field and isinstance(agents_field[0], dict):
-            env_agents = agents_field
-        elif agents_field and env_idx < len(agents_field):
-            env_agents = agents_field[env_idx]
-        else:
-            env_agents = []
-
-        done_field = observation.get("done")
-        if isinstance(done_field, (list, tuple, np.ndarray)):
-            env_done = bool(done_field[env_idx])
-        else:
-            env_done = bool(done_field) if done_field is not None else False
-
-        winner_field = observation.get("winner")
-        if isinstance(winner_field, (list, tuple, np.ndarray)):
-            env_winner = winner_field[env_idx]
-        else:
-            env_winner = winner_field
-
-        steps_field = observation.get("steps")
-        if isinstance(steps_field, (list, tuple, np.ndarray)):
-            env_steps = int(steps_field[env_idx])
-        else:
-            env_steps = int(steps_field) if steps_field is not None else 0
-
-        return {
-            "obs": env_obs,
-            "agents": env_agents,
-            "done": env_done,
-            "winner": env_winner,
-            "steps": env_steps,
-        }
-
-    def _reward_row_to_dict(self, reward_row: np.ndarray) -> Dict[int, float]:
-        return {
-            agent_id: float(reward_row[agent_id]) for agent_id in range(self.env.config.num_agents)
-        }
-
     def _init_logging(self, title: str = "Training"):
         training_logger.header(title)
         if self.config:
@@ -328,105 +221,97 @@ class PPOTrainer(Trainer):
         training_start = time.perf_counter()
         paused_time = 0.0
         last_active_time = 0.0
-        total_agent_steps = 0
-        last_logged_steps = 0
+        last_total_steps = 0
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
             self.stats.reset_episode()
 
-            obs = self.env.reset()
-            self.env_batch_size = self._batch_size_from_obs(obs)
+            self.env.reset()
             episode_reward = 0.0
-            episode_agent_steps = 0
 
             for step in range(self.env.config.max_steps):
-                obs_tensor = self._prepare_obs_tensor(obs)
-                batch_envs = obs_tensor.shape[0]
+                obs = self.env.get_observation()
 
-                actions_per_env: List[Dict[int, int]] = [{} for _ in range(batch_envs)]
-                collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
+                ## INFERENCE PHASE (DATA COLLECTION)
 
+                actions = {}
+                collected_step_data = []
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
+                        obs_tensor = (
+                            torch.from_numpy(obs["obs"])  # type: ignore[arg-type]
+                            .to(self.dtype)
+                            .unsqueeze(0)
+                            .to(self.device)
+                        )
                         logits, value = agent.policy(obs_tensor)
                         dist = torch.distributions.Categorical(logits=logits)
                         action = dist.sample()
                         log_prob = dist.log_prob(action)
+                        # Convert action to int for env.step
+                        action_int = action.item()
+                        actions[agent.agent_id] = action_int
+                        collected_step_data.append(
+                            {
+                                "agent_id": agent.agent_id,
+                                "observation": obs_tensor,
+                                "action": action,
+                                "log_prob": log_prob,
+                                "value": value,
+                            }
+                        )
 
-                    collected_agent_data[agent.agent_id] = {
-                        "action": action,
-                        "log_prob": log_prob,
-                        "value": value,
-                    }
-
-                    action_cpu = action.detach().cpu()
-                    for env_idx in range(batch_envs):
-                        actions_per_env[env_idx][agent.agent_id] = int(action_cpu[env_idx].item())
-
-                env_actions: Union[Sequence[Dict[int, int]], Dict[int, int]]
-                if batch_envs == 1:
-                    env_actions = actions_per_env[0]
-                else:
-                    env_actions = actions_per_env
-
-                obs, reward, done, info = self.env.step(env_actions)
-
-                reward_array = self._reward_to_array(reward, batch_envs)
-                done_array = self._done_to_array(done, batch_envs)
-                info_list = self._ensure_info_list(info, batch_envs)
+                obs, reward, done, info = self.env.step(actions)
 
                 if self.episode_save_dir:
-                    for env_idx in range(batch_envs):
-                        frame_obs = self._extract_env_observation(obs, env_idx)
-                        frame_reward = self._reward_row_to_dict(reward_array[env_idx])
-                        frame_record = self._build_frame_record(
-                            frame_obs,
-                            actions_per_env[env_idx],
-                            frame_reward,
-                            info_list[env_idx],
-                            step + 1,
-                            bool(done_array[env_idx]),
-                        )
-                        self.stats.record_frame(frame_record)
+                    frame_record = self._build_frame_record(
+                        obs,
+                        actions,
+                        reward,
+                        info,
+                        step + 1,
+                        done,
+                    )
+                    self.stats.record_frame(frame_record)
 
-                for env_idx in range(batch_envs):
-                    env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
-                    env_done = bool(done_array[env_idx])
-                    env_info = info_list[env_idx]
-                    for agent_id, agent_data in collected_agent_data.items():
-                        reward_value = float(reward_array[env_idx, agent_id])
-                        action_tensor = agent_data["action"][env_idx].unsqueeze(0).detach()
-                        log_prob_tensor = agent_data["log_prob"][env_idx].unsqueeze(0).detach()
-                        value_tensor = agent_data["value"][env_idx].unsqueeze(0).detach()
-                        experience = Experience(
-                            agent_id=agent_id,
-                            observation=env_obs,
-                            action=action_tensor,
-                            log_prob=log_prob_tensor,
-                            value=value_tensor,
-                            reward=reward_value,
-                            done=env_done,
-                            info=env_info,
-                        )
-                        self.replay_buffer.add(experience)
-                        self.stats.push_experience(experience)
-                    self.stats.step()
+                # store experiences for each agent
+                for data in collected_step_data:
+                    agent_reward = (
+                        reward.get(data["agent_id"], 0.0) if isinstance(reward, dict) else reward
+                    )
+                    experience = Experience(
+                        agent_id=data["agent_id"],
+                        observation=data["observation"],
+                        action=data["action"],
+                        log_prob=data["log_prob"],
+                        value=data["value"],
+                        reward=agent_reward,
+                        done=done,
+                        info=info,
+                    )
+                    self.replay_buffer.add(experience)
 
-                episode_reward += float(reward_array.sum())
+                    # Track stats per agent
+                    self.stats.push_experience(experience)
+                self.stats.step()
 
-                steps_this_iter = batch_envs * max(len(self.agents), 1)
-                episode_agent_steps += steps_this_iter
-                total_agent_steps += steps_this_iter
+                # Accumulate episode reward
+                if isinstance(reward, dict):
+                    episode_reward += sum(reward.values())
+                else:
+                    episode_reward += reward
 
-                if (step + 1) % 100 == 0 or step == self.env.config.max_steps - 1:
+                # Log step progress (every 10 steps to reduce output)
+                if (step + 1) % 10 == 0 or step == self.env.config.max_steps - 1:
                     active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
-                    delta_steps = total_agent_steps - last_logged_steps
+                    total_steps_done = episode * self.env.config.max_steps + step + 1
+                    delta_steps = total_steps_done - last_total_steps
                     delta_time = max(active_time - last_active_time, 1e-8)
                     steps_per_sec = delta_steps / delta_time
                     last_active_time = active_time
-                    last_logged_steps = total_agent_steps
+                    last_total_steps = total_steps_done
                     training_logger.log_step(
                         step + 1,
                         self.env.config.max_steps,
@@ -435,9 +320,6 @@ class PPOTrainer(Trainer):
                             "steps_per_sec": round(steps_per_sec, 2),
                         },
                     )
-
-                if done_array.all():
-                    break
 
             # Clear the step progress line before training logs
             print()
@@ -456,6 +338,7 @@ class PPOTrainer(Trainer):
 
                     # Extract trajectory data as lists
                     observations = [exp.observation for exp in trajectory]
+                    actions = [exp.action for exp in trajectory]
                     rewards = [
                         sum(exp.reward.values()) if isinstance(exp.reward, dict) else exp.reward
                         for exp in trajectory
@@ -516,12 +399,12 @@ class PPOTrainer(Trainer):
                     )
                     self.stats.log_wandb(step=self.stats.steps)
 
-            avg_reward = episode_reward / max(episode_agent_steps, 1)
+            avg_reward = episode_reward / max(self.env.config.max_steps, 1)
             training_logger.end_episode(
                 episode + 1,
                 total_reward=episode_reward,
                 avg_reward=avg_reward,
-                steps=episode_agent_steps,
+                steps=self.env.config.max_steps,
             )
 
             self.stats.push_reward(episode_reward)
