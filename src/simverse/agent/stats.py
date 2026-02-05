@@ -38,6 +38,7 @@ class TrainingStats:
         default_factory=lambda: defaultdict(lambda: defaultdict(list))
     )
     current_episode_frames: List[Dict[str, Any]] = field(default_factory=list)
+    env_count: int = 1
 
     def push_experience(self, experience: Experience) -> None:
         self.experiences.append(experience)
@@ -69,6 +70,10 @@ class TrainingStats:
     def step(self) -> None:
         self.steps += 1
 
+    def set_env_count(self, count: int) -> None:
+        if count > 0:
+            self.env_count = count
+
     def log_wandb(self, step: Optional[int] = None) -> None:
         if not _WANDB_AVAILABLE or getattr(wandb, "run", None) is None:
             return
@@ -89,6 +94,9 @@ class TrainingStats:
             payload["episode/reward"] = self.episode_rewards[-1]
             payload["episode/cumulative_reward"] = sum(self.episode_rewards)
             payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
+            payload["episode/cumulative_reward_per_env"] = payload[
+                "episode/cumulative_reward"
+            ] / max(self.env_count, 1)
 
         if self.experiences:
             last = self.experiences[-1]
