@@ -16,7 +16,7 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
-from simverse.envs.farmtila.env import FarmtilaEnv
+from simverse.envs.farmtila.env import FarmtilaEnv, FarmtillaVectorizedEnv
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -51,6 +51,7 @@ def train(use_wandb: bool = True):
         "width": 30,
         "height": 20,
         "num_agents": 4,
+        "num_envs": 24,
         "max_steps": 1000,
         "episodes": 100,
         "training_epochs": 1,
@@ -61,7 +62,7 @@ def train(use_wandb: bool = True):
         "total_seeds": 500,
         "batch_size": 512,
         "buffer_size": 50000,
-        "device": "cpu",
+        "device": "mps",
         "dtype": torch.float32,
     }
 
@@ -69,13 +70,17 @@ def train(use_wandb: bool = True):
         width=training_config["width"],
         height=training_config["height"],
         num_agents=training_config["num_agents"],
+        num_envs=training_config["num_envs"],
         total_seeds_per_episode=training_config["total_seeds"],
         max_steps=training_config["max_steps"],
         spawn_seed_every=100,
         seeds_per_spawn=10,
         policies=[],
     )
-    env = FarmtilaEnv(config=config)
+    if training_config["num_envs"] > 1:
+        env = FarmtillaVectorizedEnv(config=config, num_envs=training_config["num_envs"])
+    else:
+        env = FarmtilaEnv(config=config)
     policy_specs = [
         PolicySpec(
             name=f"simple_agent_{agent_id}",

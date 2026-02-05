@@ -288,6 +288,8 @@ class FarmtillaVectorizedEnv(SimEnv):
             raise ValueError("FarmtillaVectorizedEnv requires at least one environment instance")
         self.envs = [FarmtilaEnv(deepcopy(config)) for _ in range(self.num_envs)]
         self._last_obs: List[Dict[str, Any]] = []
+        self.agents: List[FarmtilaAgent] = []
+        self.steps = 0
 
     @property
     def action_space(self):  # type: ignore[override]
@@ -298,6 +300,7 @@ class FarmtillaVectorizedEnv(SimEnv):
         return self.envs[0].observation_space
 
     def reset(self):  # type: ignore[override]
+        self.steps = 0
         self._last_obs = [env.reset() for env in self.envs]
         return self._stack_observations(self._last_obs)
 
@@ -324,12 +327,16 @@ class FarmtillaVectorizedEnv(SimEnv):
         reward_array = self._stack_rewards(reward_batch)
         done_array = np.asarray(done_batch, dtype=np.bool_)
 
+        self.steps += 1
         return stacked_obs, reward_array, done_array, info_batch
 
     def get_observation(self):  # type: ignore[override]
         if not self._last_obs:
             return self.reset()
         return self._stack_observations(self._last_obs)
+
+    def assign_agents(self, agents: List[FarmtilaAgent]) -> None:
+        self.agents = agents
 
     def _stack_rewards(self, reward_dicts: List[Dict[int, float]]) -> np.ndarray:
         reward_array = np.zeros((self.num_envs, self.config.num_agents), dtype=np.float32)
