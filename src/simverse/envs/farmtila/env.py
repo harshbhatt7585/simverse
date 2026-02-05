@@ -275,3 +275,18 @@ class FarmtilaEnv(SimEnv):
             "steps": self.steps,
         }
         return obs, rewards, dones, info
+
+
+class FarmtillaVectorizedEnv(SimEnv):
+    def __init__(self, config: FarmtilaConfig):
+        self.config = config
+        self.envs = [FarmtilaEnv(config) for _ in range(config.num_envs)]
+
+    def reset(self):
+        return [env.reset() for env in self.envs]
+
+    def step(self, actions: List[List[int]]):
+        return [env.step(actions[i]) for i, env in enumerate(self.envs)]
+
+    def get_observation(self):
+        return [env.get_observation() for env in self.envs]
