@@ -164,6 +164,7 @@ def run_async_vectorized_demo(
     num_envs: int,
     num_agents: int,
     rollout_steps: int,
+    num_episodes: int,
     device: torch.device,
 ) -> None:
     # Header
@@ -195,74 +196,79 @@ def run_async_vectorized_demo(
     for policy_name, count in sorted(policy_counts.items()):
         print(f"  {policy_name:20s}: {count:2d} agents")
 
-    obs = env.reset()
-    last_ts = time.perf_counter()
-    total_steps = 0
-    total_time = 0.0
+    global_step_times: List[float] = []
+    global_step_throughputs: List[float] = []
+    global_total_steps = 0
+    global_total_time = 0.0
     avg_throughput = 0.0
-    step_times: List[float] = []
-    step_throughputs: List[float] = []
 
     print("\n" + "─" * 70)
-    print("🔄 Running Rollout...")
+    print("🔄 Running Rollouts...")
     print("─" * 70)
 
-    for step in range(rollout_steps):
-        step_start = time.perf_counter()
-        state_obs = obs["state"]  # [num_envs, num_agents, obs_dim]
+    for episode in range(num_episodes):
+        print(f"\n🎬 Episode {episode + 1}/{num_episodes}")
+        obs = env.reset()
+        last_ts = time.perf_counter()
 
-        # Policy inference
-        inference_start = time.perf_counter()
-        per_agent_actions: List[torch.Tensor] = []
-        for agent_id, policy in enumerate(policies):
-            obs_for_agent = state_obs[:, agent_id, :]
-            actions = policy(obs_for_agent)
-            per_agent_actions.append(actions)
-        inference_time = time.perf_counter() - inference_start
+        for step in range(rollout_steps):
+            step_start = time.perf_counter()
+            state_obs = obs["state"]  # [num_envs, num_agents, obs_dim]
 
-        batched_actions = torch.stack(per_agent_actions, dim=1)
+            # Policy inference
+            inference_start = time.perf_counter()
+            per_agent_actions: List[torch.Tensor] = []
+            for agent_id, policy in enumerate(policies):
+                obs_for_agent = state_obs[:, agent_id, :]
+                actions = policy(obs_for_agent)
+                per_agent_actions.append(actions)
+            inference_time = time.perf_counter() - inference_start
 
-        # Environment step
-        env_start = time.perf_counter()
-        env.step_async(batched_actions)
-        obs, rewards, done = env.step_wait()
-        env_time = time.perf_counter() - env_start
+            batched_actions = torch.stack(per_agent_actions, dim=1)
 
-        # Timing
-        now = time.perf_counter()
-        step_elapsed = now - step_start
-        total_elapsed = now - last_ts
-        total_steps += num_envs * num_agents
-        total_time += total_elapsed
-        step_times.append(step_elapsed)
+            # Environment step
+            env_start = time.perf_counter()
+            env.step_async(batched_actions)
+            obs, rewards, done = env.step_wait()
+            env_time = time.perf_counter() - env_start
 
-        agent_steps_per_sec = (num_envs * num_agents) / max(total_elapsed, 1e-6)
-        step_throughputs.append(agent_steps_per_sec)
-        avg_throughput = total_steps / max(total_time, 1e-6)
+            # Timing
+            now = time.perf_counter()
+            step_elapsed = now - step_start
+            total_elapsed = now - last_ts
+            global_total_steps += num_envs * num_agents
+            global_total_time += total_elapsed
+            global_step_times.append(step_elapsed)
 
-        # Progress bar
-        progress = _progress_bar(step + 1, rollout_steps)
+            agent_steps_per_sec = (num_envs * num_agents) / max(total_elapsed, 1e-6)
+            global_step_throughputs.append(agent_steps_per_sec)
+            avg_throughput = global_total_steps / max(global_total_time, 1e-6)
 
-        # Log step details
-        reward_mean = rewards.mean().item() if isinstance(rewards, torch.Tensor) else float(rewards)
-        reward_std = rewards.std().item() if isinstance(rewards, torch.Tensor) else 0.0
+            # Progress bar
+            progress = _progress_bar(step + 1, rollout_steps)
 
-        print(
-            f"Step {step + 1:3d}/{rollout_steps} │ {progress} │ "
-            f"Throughput: {agent_steps_per_sec:7.1f} agent-steps/s │ "
-            f"Avg: {avg_throughput:7.1f} agent-steps/s"
-        )
-        print(
-            f"  ├─ Inference: {inference_time * 1000:6.2f}ms │ "
-            f"Env step: {env_time * 1000:6.2f}ms │ "
-            f"Total: {step_elapsed * 1000:6.2f}ms"
-        )
-        print(
-            f"  ├─ Reward: mean={reward_mean:7.3f}, std={reward_std:7.3f} │ "
-            f"Actions shape: {list(batched_actions.shape)}"
-        )
+            # Log step details
+            reward_mean = (
+                rewards.mean().item() if isinstance(rewards, torch.Tensor) else float(rewards)
+            )
+            reward_std = rewards.std().item() if isinstance(rewards, torch.Tensor) else 0.0
 
-        last_ts = now
+            print(
+                f"Step {step + 1:3d}/{rollout_steps} │ {progress} │ "
+                f"Throughput: {agent_steps_per_sec:7.1f} agent-steps/s │ "
+                f"Avg: {avg_throughput:7.1f} agent-steps/s"
+            )
+            print(
+                f"  ├─ Inference: {inference_time * 1000:6.2f}ms │ "
+                f"Env step: {env_time * 1000:6.2f}ms │ "
+                f"Total: {step_elapsed * 1000:6.2f}ms"
+            )
+            print(
+                f"  ├─ Reward: mean={reward_mean:7.3f}, std={reward_std:7.3f} │ "
+                f"Actions shape: {list(batched_actions.shape)}"
+            )
+
+            last_ts = now
 
     # Summary
     total_wall_time = time.perf_counter() - start_time
@@ -270,28 +276,29 @@ def run_async_vectorized_demo(
     print("📈 Summary Statistics")
     print("─" * 70)
 
-    if not step_times:
+    if not global_step_times:
         print("  No rollout steps executed.")
         print("=" * 70 + "\n")
         return
 
-    avg_step_ms = sum(step_times) / len(step_times) * 1000
-    print(f"  Total agent-steps: {_format_number(float(total_steps))}")
+    avg_step_ms = sum(global_step_times) / len(global_step_times) * 1000
+    print(f"  Total agent-steps: {_format_number(float(global_total_steps))}")
     print(f"  Total wall time: {total_wall_time:.3f}s")
     print(f"  Average throughput: {_format_number(avg_throughput)} agent-steps/s")
-    print(f"  Peak throughput: {_format_number(max(step_throughputs))} agent-steps/s")
-    print(f"  Min throughput: {_format_number(min(step_throughputs))} agent-steps/s")
+    print(f"  Peak throughput: {_format_number(max(global_step_throughputs))} agent-steps/s")
+    print(f"  Min throughput: {_format_number(min(global_step_throughputs))} agent-steps/s")
     print(f"  Average step time: {avg_step_ms:.2f}ms")
-    print(f"  Min step time: {min(step_times) * 1000:.2f}ms")
-    print(f"  Max step time: {max(step_times) * 1000:.2f}ms")
+    print(f"  Min step time: {min(global_step_times) * 1000:.2f}ms")
+    print(f"  Max step time: {max(global_step_times) * 1000:.2f}ms")
     print("=" * 70 + "\n")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Async vectorized env demo")
-    parser.add_argument("--num-envs", type=int, default=4)
-    parser.add_argument("--num-agents", type=int, default=3)
-    parser.add_argument("--rollout-steps", type=int, default=5)
+    parser.add_argument("--num-envs", type=int, default=64)
+    parser.add_argument("--num-agents", type=int, default=8)
+    parser.add_argument("--rollout-steps", type=int, default=1000)
+    parser.add_argument("--num-episodes", type=int, default=100)
     parser.add_argument(
         "--device",
         choices=["cpu", "mps"],
@@ -312,5 +319,6 @@ if __name__ == "__main__":
         num_envs=args.num_envs,
         num_agents=args.num_agents,
         rollout_steps=args.rollout_steps,
+        num_episodes=args.num_episodes,
         device=device,
     )
