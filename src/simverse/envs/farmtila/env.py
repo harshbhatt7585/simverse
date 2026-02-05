@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Tuple
+from copy import deepcopy
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -275,3 +276,83 @@ class FarmtilaEnv(SimEnv):
             "steps": self.steps,
         }
         return obs, rewards, dones, info
+
+
+class FarmtillaVectorizedEnv(SimEnv):
+    """Lightweight wrapper that runs many FarmtilaEnv copies in parallel."""
+
+    def __init__(self, config: FarmtilaConfig, num_envs: int | None = None) -> None:
+        self.config = config
+        self.num_envs = num_envs or getattr(config, "num_envs", 1)
+        if self.num_envs <= 0:
+            raise ValueError("FarmtillaVectorizedEnv requires at least one environment instance")
+        self.envs = [FarmtilaEnv(deepcopy(config)) for _ in range(self.num_envs)]
+        self._last_obs: List[Dict[str, Any]] = []
+        self.agents: List[FarmtilaAgent] = []
+        self.steps = 0
+
+    @property
+    def action_space(self):  # type: ignore[override]
+        return self.envs[0].action_space
+
+    @property
+    def observation_space(self):  # type: ignore[override]
+        return self.envs[0].observation_space
+
+    def reset(self):  # type: ignore[override]
+        self.steps = 0
+        self._last_obs = [env.reset() for env in self.envs]
+        return self._stack_observations(self._last_obs)
+
+    def step(self, actions: Sequence[Dict[int, int] | Iterable[int] | int | None]):  # type: ignore[override]
+        if len(actions) != self.num_envs:
+            raise ValueError(
+                f"Expected {self.num_envs} action collections, received {len(actions)} instead"
+            )
+
+        obs_batch: List[Dict[str, Any]] = []
+        reward_batch: List[Dict[int, float]] = []
+        done_batch: List[bool] = []
+        info_batch: List[Dict[str, Any]] = []
+
+        for env, env_actions in zip(self.envs, actions):
+            obs, reward, done, info = env.step(env_actions)
+            obs_batch.append(obs)
+            reward_batch.append(reward)
+            done_batch.append(done)
+            info_batch.append(info)
+
+        self._last_obs = obs_batch
+        stacked_obs = self._stack_observations(obs_batch)
+        reward_array = self._stack_rewards(reward_batch)
+        done_array = np.asarray(done_batch, dtype=np.bool_)
+
+        self.steps += 1
+        return stacked_obs, reward_array, done_array, info_batch
+
+    def get_observation(self):  # type: ignore[override]
+        if not self._last_obs:
+            return self.reset()
+        return self._stack_observations(self._last_obs)
+
+    def assign_agents(self, agents: List[FarmtilaAgent]) -> None:
+        self.agents = agents
+
+    def _stack_rewards(self, reward_dicts: List[Dict[int, float]]) -> np.ndarray:
+        reward_array = np.zeros((self.num_envs, self.config.num_agents), dtype=np.float32)
+        for env_idx, rewards in enumerate(reward_dicts):
+            for agent_id in range(self.config.num_agents):
+                reward_array[env_idx, agent_id] = float(rewards.get(agent_id, 0.0))
+        return reward_array
+
+    def _stack_observations(self, observations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        obs_tensor = np.stack([obs["obs"] for obs in observations], axis=0)
+        steps = np.array([obs.get("steps", 0) for obs in observations], dtype=np.int32)
+        done_flags = np.array([obs.get("done", False) for obs in observations], dtype=np.bool_)
+        return {
+            "obs": obs_tensor,
+            "agents": [obs.get("agents", []) for obs in observations],
+            "done": done_flags,
+            "winner": [obs.get("winner") for obs in observations],
+            "steps": steps,
+        }
