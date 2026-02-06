@@ -104,6 +104,12 @@ class FarmtilaRender:
         self.cell_size = cell_size
         self.fps = fps
         self.clock = pygame.time.Clock()
+        self.replay_speed = 1.0
+        self.replay_speed_min = 0.25
+        self.replay_speed_max = 8.0
+        self.replay_speed_step = 0.25
+        self.replay_mode = False
+        self.replay_exit_requested = False
 
         # Right panel dimensions
         self.panel_width = int(cell_size * 7)
@@ -162,10 +168,29 @@ class FarmtilaRender:
             "Verdana", max(16, int(self.cell_size * 0.6)), bold=True
         )
 
-        pygame.display.set_caption("🌾 Farmtila")
+        self.base_caption = "🌾 Farmtila"
+        self._update_caption()
 
         # Replay state container
         self.replay = ReplayState()
+
+    def _effective_fps(self) -> int:
+        multiplier = self.replay_speed if self.replay_mode else 1.0
+        return max(1, int(round(self.fps * multiplier)))
+
+    def _update_caption(self) -> None:
+        if self.replay_mode:
+            caption = f"{self.base_caption} (Replay x{self.replay_speed:.2f})"
+        else:
+            caption = self.base_caption
+        pygame.display.set_caption(caption)
+
+    def _set_replay_speed(self, value: float) -> None:
+        self.replay_speed = max(self.replay_speed_min, min(self.replay_speed_max, value))
+        self._update_caption()
+
+    def _adjust_replay_speed(self, delta: float) -> None:
+        self._set_replay_speed(self.replay_speed + delta)
 
     def _init_display(self) -> pygame.Surface:
         # Add panel width to the right side
@@ -645,7 +670,7 @@ class FarmtilaRender:
             self._draw_winner_overlay(env)
 
         pygame.display.flip()
-        self.clock.tick(self.fps)
+        self.clock.tick(self._effective_fps())
 
     def handle_events(self) -> int | None:
         """Handle key/mouse events and return action id or None (raises SystemExit on quit)."""
@@ -653,7 +678,7 @@ class FarmtilaRender:
             if event.type == pygame.QUIT:
                 raise SystemExit
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+                if event.key in (pygame.K_ESCAPE, pygame.K_q):
                     raise SystemExit
                 if self.running_random:
                     self.run_random_simulation()  # toggles off
@@ -700,6 +725,9 @@ class FarmtilaRender:
         self.replay.index = 0
         self.replay.playing = False
         self.external_control = True
+        self.replay_mode = True
+        self.replay_exit_requested = False
+        self._update_caption()
         self._reset_winner_overlay()
         if not self.replay.frames:
             raise ValueError("Replay file contains no frames: " + (source_path or "<memory>"))
@@ -707,6 +735,7 @@ class FarmtilaRender:
     def play_replay(self, loop: bool = False) -> None:
         if not self.replay.env or not self.replay.frames:
             raise ValueError("No replay loaded")
+        self.replay_exit_requested = False
         self.replay.playing = True
         try:
             while self.replay.playing:
@@ -724,12 +753,38 @@ class FarmtilaRender:
         finally:
             self.replay.playing = False
 
+    def wait_for_replay_quit(self) -> None:
+        if not self.replay.env:
+            return
+        while True:
+            if not self._handle_replay_events():
+                return
+            self.draw(self.replay.env)
+
     def _handle_replay_events(self) -> bool:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                self.replay_exit_requested = True
                 return False
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                    self.replay_exit_requested = True
+                    return False
+                if event.key in (
+                    pygame.K_PLUS,
+                    pygame.K_EQUALS,
+                    pygame.K_KP_PLUS,
+                    pygame.K_RIGHTBRACKET,
+                ):
+                    self._adjust_replay_speed(self.replay_speed_step)
+                elif event.key in (
+                    pygame.K_MINUS,
+                    pygame.K_KP_MINUS,
+                    pygame.K_LEFTBRACKET,
+                ):
+                    self._adjust_replay_speed(-self.replay_speed_step)
+                elif event.key in (pygame.K_0, pygame.K_KP0):
+                    self._set_replay_speed(1.0)
         return True
 
     def _apply_replay_frame(self, frame: Dict[str, Any]) -> None:
@@ -1270,9 +1325,14 @@ if __name__ == "__main__":
                     data = json.loads(replay_file.read_text())
                     renderer.load_replay_data(data, source_path=str(replay_file))
                     renderer.play_replay(loop=False)
+                    if renderer.replay_exit_requested:
+                        loop_all = False
+                        break
                     renderer.episodes_completed += 1
                 if not args.loop:
                     loop_all = False
+            if not renderer.replay_exit_requested:
+                renderer.wait_for_replay_quit()
         except SystemExit:
             pass
         finally:
@@ -1292,6 +1352,8 @@ if __name__ == "__main__":
         renderer.load_replay_data(data, source_path=args.replay)
         try:
             renderer.play_replay(loop=args.loop)
+            if not renderer.replay_exit_requested:
+                renderer.wait_for_replay_quit()
         except SystemExit:
             pass
         finally:
