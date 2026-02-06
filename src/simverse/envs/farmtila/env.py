@@ -308,3 +308,35 @@ class FarmtillaVectorizedEnv(SimVectorEnv):
             "winner": [obs.get("winner") for obs in observations],
             "steps": steps,
         }
+
+    def assign_agents(self, agents: List[FarmtilaAgent]) -> None:
+        """Assign distinct agent instances per environment.
+
+        Vectorized environments should not share agent state (inventory, positions,
+        harvested tiles) across envs. We clone agents so each sub-env can maintain
+        its own counters while sharing policy objects.
+        """
+        self.agents = agents
+        templates = {agent.agent_id: agent for agent in agents}
+        for env in self.envs:
+            positions = env._sample_unique_positions(env.config.num_agents)
+            env_agents: List[FarmtilaAgent] = []
+            for agent_id, (pos_x, pos_y) in enumerate(positions):
+                template = templates.get(agent_id)
+                policy = template.policy if template is not None else None
+                action_space = getattr(template, "action_space", None)
+                if not isinstance(action_space, np.ndarray):
+                    default_action_count = getattr(
+                        env.action_space, "n", FarmtilaEnv.ACTION_SPACE.n
+                    )
+                    action_count = getattr(action_space, "n", default_action_count)
+                    action_space = np.arange(int(action_count), dtype=np.int64)
+                env_agents.append(
+                    FarmtilaAgent(
+                        agent_id=agent_id,
+                        position=(pos_x, pos_y),
+                        action_space=action_space,
+                        policy=policy,
+                    )
+                )
+            env.assign_agents(env_agents)
