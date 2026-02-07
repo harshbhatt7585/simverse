@@ -82,9 +82,8 @@ class FarmtilaEnv(SimEnv):
                 if action == self.HARVEST_ACTION:
                     if self._plant_farm(agent):
                         reward += 5.0
-                elif action == self.PICKUP_ACTION:
-                    if self._collect_seed_if_present(agent):
-                        reward += 1.0
+                if self._collect_seed_if_present(agent):
+                    reward += 1.0
             agent.reward += reward
         self.steps += 1
         self._spawn_seeds_if_due()
