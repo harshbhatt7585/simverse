@@ -458,11 +458,12 @@ class PPOTrainer(Trainer):
                     steps_per_sec = delta_steps / delta_time
                     last_active_time = active_time
                     last_logged_steps = total_agent_steps
+                    reward_per_env = episode_reward / max(batch_envs, 1)
                     training_logger.log_step(
                         step + 1,
                         self.env.config.max_steps,
                         {
-                            "reward": episode_reward,
+                            "rewards": reward_per_env,
                             "steps_per_sec": round(steps_per_sec, 2),
                         },
                     )
