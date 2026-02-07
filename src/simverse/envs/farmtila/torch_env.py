@@ -90,10 +90,20 @@ class FarmtilaTorchEnv(SimTorchEnv):
         self._spawn_agents()
         return self._get_observation()
 
+    def _action_to_delta(self, action: int) -> tuple[int, int]:
+        return {
+            0: (0, -1),
+            1: (0, 1),
+            2: (-1, 0),
+            3: (1, 0),
+        }.get(action, (0, 0))
+
     def step(
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        raise NotImplementedError("FarmtilaTorchEnv.step is not implemented yet")
+        # for action in actions:
+        #     dx, dy = self._action_to_delta(action)
+        pass
 
     def _spawn_agents(self) -> None:
         positions = torch.stack(
