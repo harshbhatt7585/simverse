@@ -39,9 +39,10 @@ Discrete (6)
 
 ## Observation Space
 
-Each agent observes the full environment state:
+Each agent observes the full environment state (as a 5-channel grid):
 
-1. the current `owner_grid`
-2. the current `seed_grid`
-3. the agent's own position
-4. the agent's inventory count (number of acquired seeds)
+1. `seed_grid`
+2. `owner_grid`
+3. `farm_grid` (farm levels)
+4. `agent_grid` (agent positions)
+5. `inventory_grid` (inventory values at agent positions)
