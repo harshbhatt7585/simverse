@@ -548,12 +548,14 @@ class PPOTrainer(Trainer):
                     )
                     self.stats.log_wandb(step=self.stats.steps)
 
-            avg_reward = episode_reward / max(episode_agent_steps, 1)
+            env_count = max(self.env_batch_size, 1)
+            episode_reward_per_env = episode_reward / env_count
+            avg_reward = episode_reward_per_env / max(episode_steps, 1)
             training_logger.end_episode(
                 episode + 1,
-                total_reward=episode_reward,
+                total_reward=episode_reward_per_env,
                 avg_reward=avg_reward,
-                steps=episode_agent_steps,
+                steps=episode_steps,
             )
 
             self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
