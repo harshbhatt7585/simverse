@@ -52,7 +52,7 @@ def train(use_wandb: bool = True):
         "height": 20,
         "num_agents": 4,
         "num_envs": 512,
-        "max_steps": 3000,
+        "max_steps": 1000,
         "episodes": 100,
         "training_epochs": 1,
         "lr": 0.001,
