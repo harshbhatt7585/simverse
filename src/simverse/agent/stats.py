@@ -62,9 +62,13 @@ class TrainingStats:
     def record_frame(self, frame: Dict[str, Any]) -> None:
         self.current_episode_frames.append(frame)
 
-    def push_reward(self, reward: float) -> None:
-        """Push total episode reward."""
-        self.episode_rewards.append(reward)
+    def push_reward(self, reward: float, env_count: int | None = None) -> None:
+        """Push total episode reward (normalized per environment)."""
+        if env_count and env_count > 0:
+            normalized_reward = reward / env_count
+        else:
+            normalized_reward = reward
+        self.episode_rewards.append(normalized_reward)
         self.episode_count += 1
 
     def step(self) -> None:
@@ -94,9 +98,6 @@ class TrainingStats:
             payload["episode/reward"] = self.episode_rewards[-1]
             payload["episode/cumulative_reward"] = sum(self.episode_rewards)
             payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
-            payload["episode/cumulative_reward_per_env"] = payload[
-                "episode/cumulative_reward"
-            ] / max(self.env_count, 1)
 
         if self.experiences:
             last = self.experiences[-1]

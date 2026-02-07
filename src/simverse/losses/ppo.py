@@ -531,7 +531,7 @@ class PPOTrainer(Trainer):
                 steps=episode_agent_steps,
             )
 
-            self.stats.push_reward(episode_reward)
+            self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
 
             pause_start = time.perf_counter()
             if self.episode_save_dir:
