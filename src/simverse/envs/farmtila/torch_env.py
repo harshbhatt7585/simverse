@@ -102,8 +102,16 @@ class FarmtilaTorchEnv(SimTorchEnv):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         # for action in actions:
+        #     agent_id = action[0]
         #     dx, dy = self._action_to_delta(action)
         pass
+
+    def _normalize_actions(self, actions: torch.Tensor, device: torch.device) -> Dict[int, int]:
+        if actions is None:
+            return torch.ModuleDict({})
+        return torch.ModuleDict(
+            {agent_id: action for agent_id, action in enumerate(actions)}, device=device
+        )
 
     def _spawn_agents(self) -> None:
         positions = torch.stack(
