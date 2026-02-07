@@ -96,7 +96,6 @@ class TrainingStats:
         # Episode-level rewards
         if self.episode_rewards:
             payload["episode/reward"] = self.episode_rewards[-1]
-            payload["episode/cumulative_reward"] = sum(self.episode_rewards)
             payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
 
         if self.experiences:
