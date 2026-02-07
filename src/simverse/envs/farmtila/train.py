@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
 def train(use_wandb: bool = True):
     # Training hyperparameters
     training_config = {
-        "width": 30,
+        "width": 20,
         "height": 20,
         "num_agents": 4,
         "num_envs": 512,
