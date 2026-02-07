@@ -51,7 +51,7 @@ def train(use_wandb: bool = True):
         "width": 20,
         "height": 20,
         "num_agents": 4,
-        "num_envs": 512,
+        "num_envs": 256,
         "max_steps": 1000,
         "episodes": 100,
         "training_epochs": 1,
