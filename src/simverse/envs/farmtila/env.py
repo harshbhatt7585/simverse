@@ -222,7 +222,18 @@ class FarmtilaEnv(SimEnv):
             return False
         x, y = agent.position
         if self.farm_grid[x, y]:
-            return False
+            current_owner = int(self.owner_grid[x, y])
+            if current_owner == agent.agent_id:
+                return False
+            self.owner_grid[x, y] = agent.agent_id
+            agent.inventory -= 1
+            agent.harvested_tiles += 1
+            previous_owner = next(
+                (other for other in self.agents if other.agent_id == current_owner), None
+            )
+            if previous_owner is not None:
+                previous_owner.harvested_tiles = max(0, previous_owner.harvested_tiles - 1)
+            return True
         self.farm_grid[x, y] = 1
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1

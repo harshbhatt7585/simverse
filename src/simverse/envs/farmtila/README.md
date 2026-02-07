@@ -4,6 +4,7 @@ Farmtila is a grid-based multi-agent RL environment. Agents explore a large fiel
 
 - Seeds spawn randomly across the map at the start of the simulation and again every **X** total agent steps.
 - Agents must collect seeds before harvesting; each seed can harvest exactly one grid cell.
+- Harvesting a tile owned by another agent flips ownership (steals the farm).
 
 ## Action Space
 
