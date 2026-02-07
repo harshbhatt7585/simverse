@@ -12,4 +12,5 @@ class FarmtilaConfig:
     seeds_per_spawn: int = 10
     max_steps: int = 10000
     total_seeds_per_episode: int = 500
+    max_farm_level: int = 2
     policies: List[Any] = field(default_factory=list)

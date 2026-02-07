@@ -4,6 +4,7 @@ Farmtila is a grid-based multi-agent RL environment. Agents explore a large fiel
 
 - Seeds spawn randomly across the map at the start of the simulation and again every **X** total agent steps.
 - Agents automatically collect seeds by stepping on them; each seed can harvest exactly one grid cell.
+- Farms can be fortified by spending extra seeds on owned tiles (max level 2); stealing a fortified farm lowers its level and penalizes the attacker.
 - Harvesting a tile owned by another agent flips ownership (steals the farm).
 
 ## Action Space
@@ -15,7 +16,7 @@ Discrete (6)
 2. move left
 3. move right
 4. pick up a seed (optional; seeds are auto-collected on entry)
-5. harvest the land
+5. harvest the land (also fortifies owned tiles)
 
 ## Grid World
 

@@ -24,9 +24,10 @@ class FarmtilaEnv(SimEnv):
     @property
     def observation_space(self):
         # 4 channels: seed_grid, owner_grid, farm_grid, agent_grid
+        max_farm_level = max(1, getattr(self.config, "max_farm_level", 1))
         return gym.spaces.Box(
             low=-1,
-            high=max(self.config.num_agents, 1),
+            high=max(self.config.num_agents, max_farm_level, 1),
             shape=(4, self.config.width, self.config.height),
             dtype=np.float32,
         )
@@ -47,6 +48,7 @@ class FarmtilaEnv(SimEnv):
         self.done = False
         self.winner: FarmtilaAgent | None = None
         self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
+        self.max_farm_level = max(1, getattr(self.config, "max_farm_level", 1))
 
     def reset(self):
         self.seed_grid.fill(0)
@@ -80,8 +82,7 @@ class FarmtilaEnv(SimEnv):
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
                 agent.position = (new_x, new_y)
                 if action == self.HARVEST_ACTION:
-                    if self._plant_farm(agent):
-                        reward += 5.0
+                    reward += self._plant_farm(agent)
                 if self._collect_seed_if_present(agent):
                     reward += 1.0
             agent.reward += reward
@@ -216,14 +217,22 @@ class FarmtilaEnv(SimEnv):
             return True
         return False
 
-    def _plant_farm(self, agent: FarmtilaAgent) -> bool:
+    def _plant_farm(self, agent: FarmtilaAgent) -> float:
         if agent.inventory <= 0:
-            return False
+            return 0.0
         x, y = agent.position
         if self.farm_grid[x, y]:
             current_owner = int(self.owner_grid[x, y])
             if current_owner == agent.agent_id:
-                return False
+                if self.farm_grid[x, y] >= self.max_farm_level:
+                    return 0.0
+                self.farm_grid[x, y] += 1
+                agent.inventory -= 1
+                return 0.0
+            if self.farm_grid[x, y] > 1:
+                self.farm_grid[x, y] -= 1
+                agent.inventory -= 1
+                return -5.0
             self.owner_grid[x, y] = agent.agent_id
             agent.inventory -= 1
             agent.harvested_tiles += 1
@@ -232,12 +241,12 @@ class FarmtilaEnv(SimEnv):
             )
             if previous_owner is not None:
                 previous_owner.harvested_tiles = max(0, previous_owner.harvested_tiles - 1)
-            return True
+            return 5.0
         self.farm_grid[x, y] = 1
         self.owner_grid[x, y] = agent.agent_id
         agent.inventory -= 1
         agent.harvested_tiles += 1
-        return True
+        return 5.0
 
     def _remaining_seed_budget(self) -> int:
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
