@@ -106,6 +106,18 @@ class TrainingStats:
             if reward_history:
                 payload[f"agent/{agent_id}/reward"] = reward_history[-1]
 
+        # Episode-level rewards
+        if self.episode_rewards:
+            payload["episode/reward"] = self.episode_rewards[-1]
+            payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
+        if self.episode_steps:
+            payload["episode/steps"] = self.episode_steps[-1]
+        if self.episode_harvested_tiles:
+            payload["episode/harvested_tiles"] = self.episode_harvested_tiles[-1]
+        if self.experiences:
+            last = self.experiences[-1]
+            payload["episode/done"] = np.float32(last.done).item()
+
         if self.policy_losses:
             payload["loss/policy"] = self.policy_losses[-1]
             payload["loss/policy_avg"] = sum(self.policy_losses) / len(self.policy_losses)
@@ -123,24 +135,6 @@ class TrainingStats:
                 payload[f"agent/{agent_id}/loss/value"] = value_losses[-1]
 
         wandb.log(payload, step=step)
-
-    def log_episode_wandb(self, step: Optional[int] = None) -> None:
-        if not _WANDB_AVAILABLE or getattr(wandb, "run", None) is None:
-            return
-        payload: Dict[str, Any] = {}
-        if self.episode_rewards:
-            payload["episode/reward"] = self.episode_rewards[-1]
-            payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
-        if self.episode_steps:
-            payload["episode/steps"] = self.episode_steps[-1]
-        if self.episode_harvested_tiles:
-            payload["episode/harvested_tiles"] = self.episode_harvested_tiles[-1]
-        if self.experiences:
-            last = self.experiences[-1]
-            payload["episode/done"] = np.float32(last.done).item()
-        if not payload:
-            return
-        wandb.log(payload, step=step if step is not None else self.episode_count)
 
     def reset_episode(self) -> None:
         """Reset episode-level stats."""
