@@ -255,6 +255,28 @@ class PPOTrainer(Trainer):
             agent_id: float(reward_row[agent_id]) for agent_id in range(self.env.config.num_agents)
         }
 
+    def _episode_harvested_tiles(self) -> float | None:
+        def _harvested_tiles_for_env(env: SimEnv) -> float | None:
+            farm_grid = getattr(env, "farm_grid", None)
+            if isinstance(farm_grid, np.ndarray):
+                return float(np.sum(farm_grid > 0))
+            agents = getattr(env, "agents", None)
+            if agents:
+                return float(sum(getattr(agent, "harvested_tiles", 0) for agent in agents))
+            return None
+
+        envs = getattr(self.env, "envs", None)
+        if isinstance(envs, list):
+            totals: List[float] = []
+            for sub_env in envs:
+                value = _harvested_tiles_for_env(sub_env)
+                if value is not None:
+                    totals.append(value)
+            if totals:
+                return float(sum(totals) / len(totals))
+            return None
+        return _harvested_tiles_for_env(self.env)
+
     def _init_logging(self, title: str = "Training"):
         training_logger.header(title)
         if self.config:

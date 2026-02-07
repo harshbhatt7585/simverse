@@ -32,6 +32,8 @@ class TrainingStats:
     episode_count: int = 0
     step_rewards: List[float] = field(default_factory=list)  # Per-step rewards
     episode_rewards: List[float] = field(default_factory=list)  # Total episode rewards
+    episode_steps: List[int] = field(default_factory=list)
+    episode_harvested_tiles: List[float] = field(default_factory=list)
     policy_losses: List[float] = field(default_factory=list)
     value_losses: List[float] = field(default_factory=list)
     agent_metrics: DefaultDict[int, DefaultDict[str, List[float]]] = field(
@@ -71,6 +73,17 @@ class TrainingStats:
         self.episode_rewards.append(normalized_reward)
         self.episode_count += 1
 
+    def push_episode_metrics(
+        self,
+        *,
+        steps: int | None = None,
+        harvested_tiles: float | None = None,
+    ) -> None:
+        if steps is not None:
+            self.episode_steps.append(int(steps))
+        if harvested_tiles is not None:
+            self.episode_harvested_tiles.append(float(harvested_tiles))
+
     def step(self) -> None:
         self.steps += 1
 
@@ -97,6 +110,10 @@ class TrainingStats:
         if self.episode_rewards:
             payload["episode/reward"] = self.episode_rewards[-1]
             payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
+        if self.episode_steps:
+            payload["episode/steps"] = self.episode_steps[-1]
+        if self.episode_harvested_tiles:
+            payload["episode/harvested_tiles"] = self.episode_harvested_tiles[-1]
 
         if self.experiences:
             last = self.experiences[-1]
