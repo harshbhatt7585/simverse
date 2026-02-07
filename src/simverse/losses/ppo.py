@@ -368,6 +368,7 @@ class PPOTrainer(Trainer):
                 record_env_idx = None
             episode_reward = 0.0
             episode_agent_steps = 0
+            episode_steps = 0
 
             for step in range(self.env.config.max_steps):
                 obs_tensor = self._prepare_obs_tensor(obs)
@@ -444,6 +445,7 @@ class PPOTrainer(Trainer):
                     self.stats.step()
 
                 episode_reward += float(reward_array.sum())
+                episode_steps = step + 1
 
                 steps_this_iter = batch_envs * max(len(self.agents), 1)
                 episode_agent_steps += steps_this_iter
@@ -554,6 +556,10 @@ class PPOTrainer(Trainer):
             )
 
             self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
+            self.stats.push_episode_metrics(
+                steps=episode_steps,
+                harvested_tiles=self._episode_harvested_tiles(),
+            )
 
             pause_start = time.perf_counter()
             if self.episode_save_dir:
