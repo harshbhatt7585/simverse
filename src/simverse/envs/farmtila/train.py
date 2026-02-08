@@ -16,7 +16,8 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
-from simverse.envs.farmtila.env import FarmtilaEnv, FarmtillaVectorizedEnv
+from simverse.envs.farmtila.env import FarmtilaEnv
+from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -78,7 +79,12 @@ def train(use_wandb: bool = True):
         policies=[],
     )
     if training_config["num_envs"] > 1:
-        env = FarmtillaVectorizedEnv(config=config, num_envs=training_config["num_envs"])
+        env = FarmtilaTorchEnv(
+            config=config,
+            num_envs=training_config["num_envs"],
+            device=training_config["device"],
+            dtype=training_config["dtype"],
+        )
     else:
         env = FarmtilaEnv(config=config)
     policy_specs = [

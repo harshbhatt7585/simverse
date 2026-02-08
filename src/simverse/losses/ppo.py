@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.simenv import SimEnv
+from simverse.abstractor.simtorch_env import SimTorchEnv
 from simverse.abstractor.trainer import Trainer
 from simverse.agent.stats import TrainingStats
 from simverse.logging_config import get_logger, training_logger
@@ -150,24 +151,33 @@ class PPOTrainer(Trainer):
             "done": bool(done),
         }
 
-    def _obs_batch_array(self, observation: Dict[str, Any]) -> np.ndarray:
+    def _obs_batch_array(self, observation: Dict[str, Any]) -> np.ndarray | torch.Tensor:
         obs_array = observation.get("obs")
-        if isinstance(obs_array, np.ndarray):
+        if isinstance(obs_array, torch.Tensor):
+            arr = obs_array
+        elif isinstance(obs_array, np.ndarray):
             arr = obs_array
         else:
             arr = np.asarray(obs_array)
         if arr.ndim == 3:
-            arr = np.expand_dims(arr, axis=0)
+            if isinstance(arr, torch.Tensor):
+                arr = arr.unsqueeze(0)
+            else:
+                arr = np.expand_dims(arr, axis=0)
         return arr
 
     def _prepare_obs_tensor(self, observation: Dict[str, Any]) -> torch.Tensor:
         obs_array = self._obs_batch_array(observation)
+        if isinstance(obs_array, torch.Tensor):
+            return obs_array.to(self.device, dtype=self.dtype)
         return torch.from_numpy(obs_array).to(self.dtype).to(self.device)
 
     def _batch_size_from_obs(self, observation: Dict[str, Any]) -> int:
         return int(self._obs_batch_array(observation).shape[0])
 
-    def _reward_to_array(self, reward: Any, batch_size: int) -> np.ndarray:
+    def _reward_to_array(self, reward: Any, batch_size: int) -> np.ndarray | torch.Tensor:
+        if isinstance(reward, torch.Tensor):
+            return reward.to(dtype=torch.float32, device=self.device)
         if isinstance(reward, np.ndarray):
             return reward.astype(np.float32, copy=False)
 
@@ -188,7 +198,9 @@ class PPOTrainer(Trainer):
 
         return reward_array
 
-    def _done_to_array(self, done: Any, batch_size: int) -> np.ndarray:
+    def _done_to_array(self, done: Any, batch_size: int) -> np.ndarray | torch.Tensor:
+        if isinstance(done, torch.Tensor):
+            return done.to(dtype=torch.bool, device=self.device)
         if isinstance(done, np.ndarray):
             return done.astype(np.bool_, copy=False)
         if isinstance(done, (list, tuple)):
@@ -225,19 +237,25 @@ class PPOTrainer(Trainer):
             env_agents = []
 
         done_field = observation.get("done")
-        if isinstance(done_field, (list, tuple, np.ndarray)):
+        if isinstance(done_field, torch.Tensor):
+            env_done = bool(done_field[env_idx].item())
+        elif isinstance(done_field, (list, tuple, np.ndarray)):
             env_done = bool(done_field[env_idx])
         else:
             env_done = bool(done_field) if done_field is not None else False
 
         winner_field = observation.get("winner")
-        if isinstance(winner_field, (list, tuple, np.ndarray)):
+        if isinstance(winner_field, torch.Tensor):
+            env_winner = winner_field[env_idx].item()
+        elif isinstance(winner_field, (list, tuple, np.ndarray)):
             env_winner = winner_field[env_idx]
         else:
             env_winner = winner_field
 
         steps_field = observation.get("steps")
-        if isinstance(steps_field, (list, tuple, np.ndarray)):
+        if isinstance(steps_field, torch.Tensor):
+            env_steps = int(steps_field[env_idx].item())
+        elif isinstance(steps_field, (list, tuple, np.ndarray)):
             env_steps = int(steps_field[env_idx])
         else:
             env_steps = int(steps_field) if steps_field is not None else 0
@@ -250,7 +268,7 @@ class PPOTrainer(Trainer):
             "steps": env_steps,
         }
 
-    def _reward_row_to_dict(self, reward_row: np.ndarray) -> Dict[int, float]:
+    def _reward_row_to_dict(self, reward_row: Any) -> Dict[int, float]:
         return {
             agent_id: float(reward_row[agent_id]) for agent_id in range(self.env.config.num_agents)
         }
@@ -395,8 +413,18 @@ class PPOTrainer(Trainer):
                     for env_idx in range(batch_envs):
                         actions_per_env[env_idx][agent.agent_id] = int(action_cpu[env_idx].item())
 
-                env_actions: Union[Sequence[Dict[int, int]], Dict[int, int]]
-                if batch_envs == 1:
+                env_actions: Union[Sequence[Dict[int, int]], Dict[int, int], torch.Tensor]
+                if isinstance(self.env, SimTorchEnv):
+                    action_tensor = torch.zeros(
+                        (batch_envs, self.env.config.num_agents),
+                        dtype=torch.int64,
+                        device=self.env.device,
+                    )
+                    for env_idx in range(batch_envs):
+                        for agent_id, action in actions_per_env[env_idx].items():
+                            action_tensor[env_idx, agent_id] = int(action)
+                    env_actions = action_tensor
+                elif batch_envs == 1:
                     env_actions = actions_per_env[0]
                 else:
                     env_actions = actions_per_env
@@ -444,7 +472,10 @@ class PPOTrainer(Trainer):
                         self.stats.push_experience(experience)
                     self.stats.step()
 
-                episode_reward += float(reward_array.sum())
+                if isinstance(reward_array, torch.Tensor):
+                    episode_reward += float(reward_array.sum().item())
+                else:
+                    episode_reward += float(reward_array.sum())
                 episode_steps = step + 1
 
                 steps_this_iter = batch_envs * max(len(self.agents), 1)
@@ -468,7 +499,11 @@ class PPOTrainer(Trainer):
                         },
                     )
 
-                if done_array.all():
+                done_all = done_array.all()
+                if isinstance(done_all, torch.Tensor):
+                    if bool(done_all.item()):
+                        break
+                elif done_all:
                     break
 
             # Clear the step progress line before training logs
