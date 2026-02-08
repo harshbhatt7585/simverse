@@ -101,9 +101,14 @@ class FarmtilaTorchEnv(SimTorchEnv):
     def step(
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        # for action in actions:
-        #     agent_id = action[0]
-        #     dx, dy = self._action_to_delta(action)
+        action_map = self._normalize_actions(actions, self.device)
+        for action, agent_id in action_map.items():
+            dx, dy = self._action_to_delta(action)
+            new_x = self.agent_pos[:, agent_id, 0] + dx
+            new_y = self.agent_pos[:, agent_id, 1] + dy
+            self.agent_pos[:, agent_id, 0] = new_x
+            self.agent_pos[:, agent_id, 1] = new_y
+
         pass
 
     def _normalize_actions(self, actions: torch.Tensor, device: torch.device) -> Dict[int, int]:
