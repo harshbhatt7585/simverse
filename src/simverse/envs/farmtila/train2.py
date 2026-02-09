@@ -16,8 +16,7 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
-from simverse.envs.farmtila.env import FarmtilaEnv
-from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
+from simverse.envs.farmtila.env import FarmtilaEnv, FarmtillaVectorizedEnv
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -36,7 +35,7 @@ def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAg
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Farmtila PPO agents")
+    parser = argparse.ArgumentParser(description="Train Farmtila PPO agents (vectorized env)")
     parser.add_argument(
         "--wandb",
         choices=["on", "off"],
@@ -47,7 +46,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def train(use_wandb: bool = True):
-    # Training hyperparameters
     training_config = {
         "width": 20,
         "height": 20,
@@ -79,14 +77,13 @@ def train(use_wandb: bool = True):
         policies=[],
     )
     if training_config["num_envs"] > 1:
-        env = FarmtilaTorchEnv(
+        env = FarmtillaVectorizedEnv(
             config=config,
             num_envs=training_config["num_envs"],
-            device=training_config["device"],
-            dtype=training_config["dtype"],
         )
     else:
         env = FarmtilaEnv(config=config)
+
     policy_specs = [
         PolicySpec(
             name=f"simple_agent_{agent_id}",
@@ -105,10 +102,8 @@ def train(use_wandb: bool = True):
         for agent_id in range(training_config["num_agents"])
     }
 
-    # Create stats tracker
     stats = TrainingStats()
 
-    # Create trainer with config for logging
     loss_trainer = PPOTrainer(
         optimizers=optimizers,
         episodes=training_config["episodes"],
@@ -119,7 +114,7 @@ def train(use_wandb: bool = True):
         stats=stats,
         config=training_config,
         project_name="simverse-farmtila",
-        run_name="ppo-training",
+        run_name="ppo-training-vectorized-env",
         episode_save_dir="recordings/farmtila",
         device=training_config["device"],
         batch_size=training_config["batch_size"],
@@ -136,8 +131,7 @@ def train(use_wandb: bool = True):
         agent_factory=agent_factory,
     )
 
-    # Start training
-    simulator.train(title="Farmtila Training")
+    simulator.train(title="Farmtila Training (VectorizedEnv)")
 
 
 if __name__ == "__main__":
