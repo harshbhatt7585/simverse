@@ -16,6 +16,10 @@ class FarmtilaEnv(SimEnv):
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
     ACTION_SPACE = gym.spaces.Discrete(6)
+    LAND_EMPTY = 0
+    LAND_TERRITORY_LOCKED = 1
+    LAND_TERRITORY_UNLOCKED = 2
+    LAND_HARVESTED = 3
 
     @property
     def action_space(self):
@@ -23,11 +27,10 @@ class FarmtilaEnv(SimEnv):
 
     @property
     def observation_space(self):
-        # 5 channels: seed_grid, owner_grid, farm_grid, agent_grid, inventory_grid
-        max_farm_level = max(1, getattr(self.config, "max_farm_level", 1))
+        # 5 channels: seed_grid, owner_grid, land_grid, agent_grid, inventory_grid
         return gym.spaces.Box(
             low=-1,
-            high=max(self.config.num_agents, max_farm_level, 1),
+            high=max(self.config.num_agents, self.LAND_HARVESTED, 1),
             shape=(5, self.config.width, self.config.height),
             dtype=np.float32,
         )
@@ -47,8 +50,7 @@ class FarmtilaEnv(SimEnv):
         self.seeds_spawned = 0
         self.done = False
         self.winner: FarmtilaAgent | None = None
-        self.max_harvested_tiles = max(1, int(self.config.width * self.config.height * 0.4))
-        self.max_farm_level = max(1, getattr(self.config, "max_farm_level", 1))
+        self.territory_block_size = max(2, int(getattr(self.config, "territory_block_size", 3)))
 
     def reset(self):
         self.seed_grid.fill(0)
@@ -74,7 +76,7 @@ class FarmtilaEnv(SimEnv):
         action_map = self._normalize_actions(actions)
         self.last_pickups = []
         for agent in self.agents:
-            reward = -0.005
+            reward = -float(getattr(self.config, "step_cost", 0.005))
             action = action_map.get(agent.agent_id)
             if action is not None:
                 dx, dy = self._action_to_delta(action)
@@ -83,7 +85,10 @@ class FarmtilaEnv(SimEnv):
                 agent.position = (new_x, new_y)
                 reward += self._seed_proximity_reward(agent.position)
                 if action == self.HARVEST_ACTION:
-                    reward += self._plant_farm(agent)
+                    land_reward, waive_step_cost = self._land_action(agent)
+                    reward += land_reward
+                    if waive_step_cost:
+                        reward += float(getattr(self.config, "step_cost", 0.005))
                 if self._collect_seed_if_present(agent):
                     reward += 1.0
             agent.reward += reward
@@ -144,7 +149,7 @@ class FarmtilaEnv(SimEnv):
             agent_grid[x, y] = agent.agent_id + 1  # +1 so 0 means empty
             inventory_grid[x, y] = agent.inventory
 
-        # [5, width, height]: seed_grid, owner_grid, farm_grid, agent_grid, inventory_grid
+        # [5, width, height]: seed_grid, owner_grid, land_grid, agent_grid, inventory_grid
         obs = np.stack(
             [
                 self.seed_grid.astype(np.float32),
@@ -206,7 +211,7 @@ class FarmtilaEnv(SimEnv):
             return
         spawned = 0
         for x, y in positions:
-            if self.seed_grid[x, y] > 0 or self.farm_grid[x, y] > 0:
+            if self.seed_grid[x, y] > 0 or self.farm_grid[x, y] > self.LAND_EMPTY:
                 continue
             self.seed_grid[x, y] = 1
             spawned += 1
@@ -240,50 +245,92 @@ class FarmtilaEnv(SimEnv):
         closeness = (max_distance - current_distance) / max_distance
         return float(np.clip(closeness, 0.0, 1.0) * step_scale)
 
-    def _plant_farm(self, agent: FarmtilaAgent) -> float:
+    def _land_action(self, agent: FarmtilaAgent) -> tuple[float, bool]:
         if agent.inventory <= 0:
-            return 0.0
+            return 0.0, False
+
+        reward = 0.0
+        waive_step_cost = False
         x, y = agent.position
-        if self.farm_grid[x, y]:
-            current_owner = int(self.owner_grid[x, y])
-            if current_owner == agent.agent_id:
-                if self.farm_grid[x, y] >= self.max_farm_level:
-                    return 0.0
-                self.farm_grid[x, y] += 1
-                agent.inventory -= 1
-                return 0.0
-            if self.farm_grid[x, y] > 1:
-                self.farm_grid[x, y] -= 1
-                agent.inventory -= 1
-                return -5.0
-            self.owner_grid[x, y] = agent.agent_id
+        current_state = int(self.farm_grid[x, y])
+        current_owner = int(self.owner_grid[x, y])
+
+        # Stage 1: spend seed to create territory (locked).
+        if current_state == self.LAND_EMPTY:
             agent.inventory -= 1
+            self.owner_grid[x, y] = agent.agent_id
+            self.farm_grid[x, y] = self.LAND_TERRITORY_LOCKED
+            reward += float(getattr(self.config, "territory_claim_reward", 0.1))
+            if bool(
+                getattr(self.config, "adjacent_territory_step_cost_waiver", True)
+            ) and self._is_adjacent_harvested(agent.agent_id, x, y):
+                waive_step_cost = True
+            unlocked_blocks = self._unlock_completed_territory_blocks(agent.agent_id, x, y)
+            if unlocked_blocks > 0:
+                reward += unlocked_blocks * float(
+                    getattr(self.config, "territory_unlock_reward", 5.0)
+                )
+            return reward, waive_step_cost
+
+        # Stage 2: spend seed on unlocked territory to harvest one land tile.
+        if current_owner == agent.agent_id and current_state == self.LAND_TERRITORY_UNLOCKED:
+            agent.inventory -= 1
+            self.farm_grid[x, y] = self.LAND_HARVESTED
             agent.harvested_tiles += 1
-            previous_owner = next(
-                (other for other in self.agents if other.agent_id == current_owner), None
-            )
-            if previous_owner is not None:
-                previous_owner.harvested_tiles = max(0, previous_owner.harvested_tiles - 1)
-            return 5.0
-        self.farm_grid[x, y] = 1
-        self.owner_grid[x, y] = agent.agent_id
-        agent.inventory -= 1
-        agent.harvested_tiles += 1
-        return 5.0
+            reward += float(getattr(self.config, "harvest_on_unlocked_reward", 1.0))
+            return reward, False
+
+        return 0.0, False
+
+    def _unlock_completed_territory_blocks(self, agent_id: int, x: int, y: int) -> int:
+        size = self.territory_block_size
+        unlocked = 0
+        x_start = max(0, x - size + 1)
+        x_end = min(x, self.config.width - size)
+        y_start = max(0, y - size + 1)
+        y_end = min(y, self.config.height - size)
+
+        for sx in range(x_start, x_end + 1):
+            for sy in range(y_start, y_end + 1):
+                owner_block = self.owner_grid[sx : sx + size, sy : sy + size]
+                land_block = self.farm_grid[sx : sx + size, sy : sy + size]
+                owned = np.all(owner_block == agent_id)
+                usable = np.all(land_block >= self.LAND_TERRITORY_LOCKED)
+                has_locked = np.any(land_block == self.LAND_TERRITORY_LOCKED)
+                if not (owned and usable and has_locked):
+                    continue
+                lock_mask = land_block == self.LAND_TERRITORY_LOCKED
+                land_block[lock_mask] = self.LAND_TERRITORY_UNLOCKED
+                self.farm_grid[sx : sx + size, sy : sy + size] = land_block
+                unlocked += 1
+        return unlocked
+
+    def _is_adjacent_harvested(self, agent_id: int, x: int, y: int) -> bool:
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            nx = x + dx
+            ny = y + dy
+            if nx < 0 or ny < 0 or nx >= self.config.width or ny >= self.config.height:
+                continue
+            if (
+                int(self.owner_grid[nx, ny]) == agent_id
+                and int(self.farm_grid[nx, ny]) == self.LAND_HARVESTED
+            ):
+                return True
+        return False
 
     def _remaining_seed_budget(self) -> int:
         return max(0, self.config.total_seeds_per_episode - self.seeds_spawned)
 
     def check_episode_end(self) -> bool:
+        for agent in self.agents:
+            if agent.harvested_tiles >= int(getattr(self.config, "harvest_goal", 3)):
+                self.winner = agent
+                agent.reward += float(getattr(self.config, "win_reward", 50.0))
+                self.done = True
+                return True
         if self.steps >= self.config.max_steps:
             self.done = True
             return True
-        for agent in self.agents:
-            if agent.harvested_tiles >= self.max_harvested_tiles:
-                self.winner = agent
-                agent.reward += 20.0
-                self.done = True
-                return True
         if self._remaining_seed_budget() <= 0:
             self.done = True
             return True

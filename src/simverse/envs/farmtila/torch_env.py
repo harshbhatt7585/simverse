@@ -15,6 +15,10 @@ class FarmtilaTorchEnv(SimTorchEnv):
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
     ACTION_SPACE = gym.spaces.Discrete(6)
+    LAND_EMPTY = 0
+    LAND_TERRITORY_LOCKED = 1
+    LAND_TERRITORY_UNLOCKED = 2
+    LAND_HARVESTED = 3
 
     def __init__(
         self,
@@ -30,8 +34,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         self.height = config.height
         self.num_agents = config.num_agents
         self.agents: list[FarmtilaAgent] = []
-        self.max_farm_level = max(1, getattr(config, "max_farm_level", 1))
-        self.max_harvested_tiles = max(1, int(self.width * self.height * 0.4))
+        self.territory_block_size = max(2, int(getattr(config, "territory_block_size", 3)))
 
         self.register_buffer(
             "seed_grid",
@@ -100,7 +103,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
     def observation_space(self):
         return gym.spaces.Box(
             low=-1,
-            high=max(self.num_agents, self.max_farm_level, 1),
+            high=max(self.num_agents, self.LAND_HARVESTED, 1),
             shape=(5, self.width, self.height),
             dtype=np.float32,
         )
@@ -132,7 +135,8 @@ class FarmtilaTorchEnv(SimTorchEnv):
             device=self.device,
         )
         active_mask = ~self.done
-        rewards += (-0.005) * active_mask.unsqueeze(1).to(self.dtype)
+        step_cost = float(getattr(self.config, "step_cost", 0.005))
+        rewards += (-step_cost) * active_mask.unsqueeze(1).to(self.dtype)
 
         delta_x = self.delta_x
         delta_y = self.delta_y
@@ -166,37 +170,40 @@ class FarmtilaTorchEnv(SimTorchEnv):
             farm_level = self.farm_grid[env_idx, pos_x, pos_y]
             owner = self.owner_grid[env_idx, pos_x, pos_y]
             same_owner = owner == agent_id
-            has_farm = farm_level > 0
 
-            fortify = harvestable & has_farm & same_owner & (farm_level < self.max_farm_level)
-            fortify_idx = env_idx[fortify]
-            self.farm_grid[fortify_idx, pos_x[fortify], pos_y[fortify]] += 1
-            self.inventory[fortify, agent_id] -= 1
+            claim = harvestable & (farm_level == self.LAND_EMPTY)
+            claim_idx = env_idx[claim]
+            if claim_idx.numel() > 0:
+                claim_reward = float(getattr(self.config, "territory_claim_reward", 0.1))
+                unlock_reward = float(getattr(self.config, "territory_unlock_reward", 5.0))
+                waive_adjacent = bool(
+                    getattr(self.config, "adjacent_territory_step_cost_waiver", True)
+                )
+                self.inventory[claim, agent_id] -= 1
+                self.owner_grid[claim_idx, pos_x[claim], pos_y[claim]] = agent_id
+                self.farm_grid[claim_idx, pos_x[claim], pos_y[claim]] = self.LAND_TERRITORY_LOCKED
+                rewards[claim, agent_id] += claim_reward
+                for e_id, cell_x, cell_y in zip(
+                    claim_idx.tolist(), pos_x[claim].tolist(), pos_y[claim].tolist()
+                ):
+                    if waive_adjacent and self._is_adjacent_harvested(
+                        env_id=e_id, agent_id=agent_id, x=cell_x, y=cell_y
+                    ):
+                        rewards[e_id, agent_id] += step_cost
+                    unlocked_blocks = self._unlock_completed_territory_blocks(
+                        env_id=e_id, agent_id=agent_id, x=cell_x, y=cell_y
+                    )
+                    if unlocked_blocks > 0:
+                        rewards[e_id, agent_id] += unlock_reward * unlocked_blocks
 
-            reduce_fort = harvestable & has_farm & (~same_owner) & (farm_level > 1)
-            reduce_idx = env_idx[reduce_fort]
-            self.farm_grid[reduce_idx, pos_x[reduce_fort], pos_y[reduce_fort]] -= 1
-            self.inventory[reduce_fort, agent_id] -= 1
-            rewards[reduce_fort, agent_id] -= 5.0
-
-            steal = harvestable & has_farm & (~same_owner) & (farm_level == 1)
-            steal_idx = env_idx[steal]
-            self.owner_grid[steal_idx, pos_x[steal], pos_y[steal]] = agent_id
-            self.inventory[steal, agent_id] -= 1
-            self.harvested_tiles[steal, agent_id] += 1
-            rewards[steal, agent_id] += 5.0
-            prev_owner = owner[steal]
-            self.harvested_tiles[steal_idx, prev_owner] = torch.clamp(
-                self.harvested_tiles[steal_idx, prev_owner] - 1, min=0
-            )
-
-            plant = harvestable & (farm_level == 0)
-            plant_idx = env_idx[plant]
-            self.farm_grid[plant_idx, pos_x[plant], pos_y[plant]] = 1
-            self.owner_grid[plant_idx, pos_x[plant], pos_y[plant]] = agent_id
-            self.inventory[plant, agent_id] -= 1
-            self.harvested_tiles[plant, agent_id] += 1
-            rewards[plant, agent_id] += 5.0
+            harvest = harvestable & same_owner & (farm_level == self.LAND_TERRITORY_UNLOCKED)
+            harvest_idx = env_idx[harvest]
+            if harvest_idx.numel() > 0:
+                harvest_reward = float(getattr(self.config, "harvest_on_unlocked_reward", 1.0))
+                self.inventory[harvest, agent_id] -= 1
+                self.farm_grid[harvest_idx, pos_x[harvest], pos_y[harvest]] = self.LAND_HARVESTED
+                self.harvested_tiles[harvest, agent_id] += 1
+                rewards[harvest, agent_id] += harvest_reward
 
             pickup = active_action & (self.seed_grid[env_idx, pos_x, pos_y] > 0)
             pickup_idx = env_idx[pickup]
@@ -338,19 +345,58 @@ class FarmtilaTorchEnv(SimTorchEnv):
     def _remaining_seed_budget(self, env_id: int) -> int:
         return max(0, int(self.config.total_seeds_per_episode - self.seeds_spawned[env_id].item()))
 
+    def _unlock_completed_territory_blocks(self, env_id: int, agent_id: int, x: int, y: int) -> int:
+        size = self.territory_block_size
+        unlocked = 0
+        x_start = max(0, x - size + 1)
+        x_end = min(x, self.width - size)
+        y_start = max(0, y - size + 1)
+        y_end = min(y, self.height - size)
+        for sx in range(x_start, x_end + 1):
+            for sy in range(y_start, y_end + 1):
+                owner_block = self.owner_grid[env_id, sx : sx + size, sy : sy + size]
+                land_block = self.farm_grid[env_id, sx : sx + size, sy : sy + size]
+                owned = bool(torch.all(owner_block == agent_id).item())
+                usable = bool(torch.all(land_block >= self.LAND_TERRITORY_LOCKED).item())
+                has_locked = bool(torch.any(land_block == self.LAND_TERRITORY_LOCKED).item())
+                if not (owned and usable and has_locked):
+                    continue
+                lock_mask = land_block == self.LAND_TERRITORY_LOCKED
+                self.farm_grid[env_id, sx : sx + size, sy : sy + size] = torch.where(
+                    lock_mask,
+                    torch.full_like(land_block, self.LAND_TERRITORY_UNLOCKED),
+                    land_block,
+                )
+                unlocked += 1
+        return unlocked
+
+    def _is_adjacent_harvested(self, env_id: int, agent_id: int, x: int, y: int) -> bool:
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            nx = x + dx
+            ny = y + dy
+            if nx < 0 or ny < 0 or nx >= self.width or ny >= self.height:
+                continue
+            if (
+                int(self.owner_grid[env_id, nx, ny].item()) == agent_id
+                and int(self.farm_grid[env_id, nx, ny].item()) == self.LAND_HARVESTED
+            ):
+                return True
+        return False
+
     def _check_episode_end(self, rewards: torch.Tensor) -> None:
         active_mask = ~self.done
         max_steps_mask = self.steps >= self.config.max_steps
         self.done |= max_steps_mask
 
-        reached_harvest = self.harvested_tiles >= self.max_harvested_tiles
+        harvest_goal = int(getattr(self.config, "harvest_goal", 3))
+        reached_harvest = self.harvested_tiles >= harvest_goal
         harvest_winner = reached_harvest.any(dim=1)
         new_winners = harvest_winner & active_mask
-        winner_ids = torch.argmax(self.harvested_tiles, dim=1)
+        winner_ids = torch.argmax(reached_harvest.to(torch.int64), dim=1)
         self.winner = torch.where(new_winners, winner_ids, self.winner)
         env_ids = self.env_idx[new_winners]
         winner_for_env = winner_ids[new_winners]
-        rewards[env_ids, winner_for_env] += 20.0
+        rewards[env_ids, winner_for_env] += float(getattr(self.config, "win_reward", 50.0))
         self.done |= new_winners
 
         budgets = self.config.total_seeds_per_episode - self.seeds_spawned
