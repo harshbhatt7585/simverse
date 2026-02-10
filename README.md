@@ -6,7 +6,7 @@ Simverse is an RL library which contain pre-built ENVS, policies, and recipes. I
 - `AgentSpec` — creates the agent
 - `ENVSpec` — creates the env
 - `PolicySpec` — creates a policy
-- `Simulator` - Upper level class to run/train the simulation 
+- `Simulator` - Upper level class to run/train the simulation
 
 ## Agent
 1. Agent plays/takes action in the simulation.
@@ -43,11 +43,16 @@ sim.train(
    ```bash
    pip install -e .[dev]
    ```
-2. Install the Git hooks so Ruff runs automatically:
+2. To use PettingZoo Atari envs (like Tennis), install:
+   ```bash
+   pip install -e .[pettingzoo]
+   ```
+   Note: the Atari dependency stack currently requires Python `<3.13`.
+3. Install the Git hooks so Ruff runs automatically:
    ```bash
    pre-commit install
    ```
-3. Run the hooks on demand (useful for CI or after large refactors):
+4. Run the hooks on demand (useful for CI or after large refactors):
    ```bash
    pre-commit run --all-files
    ```

@@ -31,6 +31,10 @@ src/simverse/envs/farmtila/run.py
 src/simverse/envs/farmtila/torch_env.py
 src/simverse/envs/farmtila/train.py
 src/simverse/envs/farmtila/train2.py
+src/simverse/envs/farmtila/training_config.py
+src/simverse/envs/tennis/__init__.py
+src/simverse/envs/tennis/env.py
+src/simverse/envs/tennis/render.py
 src/simverse/losses/L2.py
 src/simverse/losses/ppo.py
 src/simverse/policies/__init__.py

@@ -6,6 +6,7 @@ __all__: list[str] = []
 
 _KNOWN_ENVS = {
     "CartPoleEnv": "simverse.envs.cartpole",
+    "PettingZooTennisEnv": "simverse.envs.tennis.env",
 }
 
 for name, module_path in _KNOWN_ENVS.items():

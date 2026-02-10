@@ -7,6 +7,7 @@ __all__: list[str] = []
 
 _OPTIONAL_EXPORTS: Dict[str, str] = {
     "CartPoleEnv": "simverse.envs.cartpole",
+    "PettingZooTennisEnv": "simverse.envs.tennis.env",
     "RandomPolicy": "simverse.policies.random_policy",
     "quicktrain": "simverse.recipes.quickstart",
 }
