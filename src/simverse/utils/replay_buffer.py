@@ -43,4 +43,8 @@ class ReplayBuffer:
             return []
         if len(agent_experiences) <= batch_size:
             return agent_experiences.copy()
-        return random.sample(agent_experiences, batch_size)
+        # PPO expects ordered on-policy trajectories for GAE; return most recent window.
+        return agent_experiences[-batch_size:]
+
+    def clear(self) -> None:
+        self.buffer.clear()
