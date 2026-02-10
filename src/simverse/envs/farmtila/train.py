@@ -48,12 +48,19 @@ def parse_args() -> argparse.Namespace:
 
 def train(use_wandb: bool = True):
     # Training hyperparameters
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
     training_config = {
         "width": 20,
         "height": 20,
         "num_agents": 4,
-        "num_envs": 256,
-        "max_steps": 1000,
+        "num_envs": 2048,
+        "max_steps": 2000,
         "episodes": 100,
         "training_epochs": 1,
         "lr": 0.001,
@@ -63,7 +70,7 @@ def train(use_wandb: bool = True):
         "total_seeds": 500,
         "batch_size": 512,
         "buffer_size": 50000,
-        "device": "mps",
+        "device": device,
         "dtype": torch.float32,
     }
 

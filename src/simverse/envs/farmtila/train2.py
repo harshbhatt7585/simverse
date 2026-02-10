@@ -61,7 +61,7 @@ def train(use_wandb: bool = True):
         "total_seeds": 500,
         "batch_size": 512,
         "buffer_size": 50000,
-        "device": "mps",
+        "device": "cuda",
         "dtype": torch.float32,
     }
 
