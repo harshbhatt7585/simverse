@@ -413,8 +413,25 @@ class PPOTrainer(Trainer):
         if current_size <= 0:
             return None
         sample_size = min(current_size, batch_size)
-        sample_indices = torch.randint(0, current_size, (sample_size,), device=self.device)
+        capacity = self._tensor_buffer_capacity
+        ptr = self._tensor_buffer_ptrs.get(agent_id, 0)
+        # Read the most recent contiguous window in chronological order.
+        start = (ptr - sample_size) % capacity
+        if start + sample_size <= capacity:
+            sample_indices = torch.arange(start, start + sample_size, device=self.device)
+        else:
+            first = torch.arange(start, capacity, device=self.device)
+            second = torch.arange(0, (start + sample_size) % capacity, device=self.device)
+            sample_indices = torch.cat((first, second), dim=0)
         return {key: value.index_select(0, sample_indices) for key, value in buffer.items()}
+
+    def _reset_tensor_buffers(self) -> None:
+        for agent in self.agents:
+            agent_id = agent.agent_id
+            if agent_id in self._tensor_buffer_sizes:
+                self._tensor_buffer_sizes[agent_id] = 0
+            if agent_id in self._tensor_buffer_ptrs:
+                self._tensor_buffer_ptrs[agent_id] = 0
 
     def _update_agent_from_tensor_buffer(self, agent: SimAgent) -> None:
         if agent.policy is None:
@@ -552,6 +569,9 @@ class PPOTrainer(Trainer):
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
             self.stats.reset_episode()
+            # Keep PPO updates on-policy: each episode trains only on fresh rollout data.
+            self.replay_buffer.clear()
+            self._reset_tensor_buffers()
 
             obs = self.env.reset()
             self.env_batch_size = self._batch_size_from_obs(obs)
