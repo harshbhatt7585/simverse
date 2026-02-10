@@ -106,8 +106,8 @@ class TrainingStats:
         if harvested_tiles is not None:
             self.episode_harvested_tiles.append(float(harvested_tiles))
 
-    def step(self) -> None:
-        self.steps += 1
+    def step(self, increment: int = 1) -> None:
+        self.steps += max(int(increment), 1)
 
     def set_env_count(self, count: int) -> None:
         if count > 0:
@@ -156,7 +156,7 @@ class TrainingStats:
             if value_losses:
                 payload[f"agent/{agent_id}/loss/value"] = value_losses[-1]
 
-        wandb.log(payload, step=step)
+        wandb.log(payload, step=self.steps if step is None else step)
 
     def reset_episode(self) -> None:
         """Reset episode-level stats."""

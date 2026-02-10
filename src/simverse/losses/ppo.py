@@ -641,7 +641,7 @@ class PPOTrainer(Trainer):
                             reward=reward_tensor[:, agent_id].detach(),
                             done=done_batch,
                         )
-                    self.stats.step()
+                    self.stats.step(batch_envs)
 
                     if episode_reward_tensor is not None:
                         episode_reward_tensor += reward_tensor.sum()
@@ -777,7 +777,7 @@ class PPOTrainer(Trainer):
                         )
                         self.replay_buffer.add(experience)
                         self.stats.push_experience(experience)
-                    self.stats.step()
+                    self.stats.step(batch_envs)
 
                 episode_reward += float(np.sum(reward_array_cpu))
                 episode_steps = step + 1
