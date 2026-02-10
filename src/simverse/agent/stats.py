@@ -17,12 +17,34 @@ import numpy as np
 from simverse.utils.replay_buffer import Experience
 
 try:
+    import torch  # type: ignore
+
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    torch = None
+    _TORCH_AVAILABLE = False
+
+try:
     import wandb  # type: ignore
 
     _WANDB_AVAILABLE = True
 except ImportError:  # pragma: no cover
     wandb = None
     _WANDB_AVAILABLE = False
+
+
+def _json_default(obj: Any) -> Any:
+    if _TORCH_AVAILABLE and isinstance(obj, torch.Tensor):
+        if obj.numel() == 1:
+            return obj.item()
+        return obj.detach().cpu().tolist()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.floating, np.integer)):
+        return obj.item()
+    if isinstance(obj, Path):
+        return str(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 
 @dataclass
@@ -162,7 +184,7 @@ class TrainingStats:
         if metadata:
             payload["metadata"] = metadata
         output_path = output_dir / f"episode_{episode:04d}.json"
-        output_path.write_text(json.dumps(payload, indent=2))
+        output_path.write_text(json.dumps(payload, indent=2, default=_json_default))
         self.current_episode_frames.clear()
         return output_path
 
