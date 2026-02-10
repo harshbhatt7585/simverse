@@ -55,12 +55,18 @@ def train(use_wandb: bool = True):
     else:
         device = "cpu"
 
+    num_agents = 4
+    num_envs = 2048
+    # Keep ~10 steps per env per agent in the replay buffer.
+    buffer_size = num_envs * num_agents * 10
+    batch_size = min(8192, buffer_size // max(num_agents, 1))
+
     training_config = {
         "width": 20,
         "height": 20,
-        "num_agents": 4,
-        "num_envs": 2048,
-        "max_steps": 2000,
+        "num_agents": num_agents,
+        "num_envs": num_envs,
+        "max_steps": 1500,
         "episodes": 100,
         "training_epochs": 1,
         "lr": 0.001,
@@ -68,8 +74,8 @@ def train(use_wandb: bool = True):
         "gamma": 0.99,
         "gae_lambda": 0.95,
         "total_seeds": 500,
-        "batch_size": 512,
-        "buffer_size": 50000,
+        "batch_size": batch_size,
+        "buffer_size": buffer_size,
         "device": device,
         "dtype": torch.float32,
     }
