@@ -596,7 +596,9 @@ class PPOTrainer(Trainer):
         gae = torch.zeros(env_count, dtype=self.dtype, device=self.device)
         for step in range(values_seq.shape[0] - 1, -1, -1):
             non_terminal = (~dones_seq[step]).to(dtype=self.dtype)
-            delta = rewards_seq[step] + self.gamma * next_values[step] * non_terminal - values_seq[step]
+            delta = (
+                rewards_seq[step] + self.gamma * next_values[step] * non_terminal - values_seq[step]
+            )
             gae = delta + self.gamma * self.gae_lambda * non_terminal * gae
             advantages[step] = gae
         return advantages.reshape(-1)

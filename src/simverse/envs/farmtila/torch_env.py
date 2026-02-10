@@ -83,6 +83,13 @@ class FarmtilaTorchEnv(SimTorchEnv):
             "env_idx",
             torch.arange(self.num_envs, dtype=torch.int64),
         )
+        grid_x, grid_y = torch.meshgrid(
+            torch.arange(self.width, dtype=torch.int64),
+            torch.arange(self.height, dtype=torch.int64),
+            indexing="ij",
+        )
+        self.register_buffer("seed_cell_x", grid_x.reshape(-1))
+        self.register_buffer("seed_cell_y", grid_y.reshape(-1))
         self.to(self.device)
 
     @property
@@ -142,10 +149,16 @@ class FarmtilaTorchEnv(SimTorchEnv):
             pos_y = self.agent_pos[:, agent_id, 1]
             new_x = torch.clamp(pos_x + dx, 0, self.width - 1)
             new_y = torch.clamp(pos_y + dy, 0, self.height - 1)
+            proximity_reward = self._seed_proximity_reward(
+                new_x=new_x,
+                new_y=new_y,
+                active_action=active_action,
+            )
             pos_x = torch.where(active_action, new_x, pos_x)
             pos_y = torch.where(active_action, new_y, pos_y)
             self.agent_pos[:, agent_id, 0] = pos_x
             self.agent_pos[:, agent_id, 1] = pos_y
+            rewards[:, agent_id] += proximity_reward
 
             harvest_action = (action == self.HARVEST_ACTION) & active_action
             inventory_before = self.inventory[:, agent_id]
@@ -221,6 +234,40 @@ class FarmtilaTorchEnv(SimTorchEnv):
         if actions.device != self.device or actions.dtype != torch.int64:
             actions = actions.to(device=self.device, dtype=torch.int64)
         return actions
+
+    def _seed_proximity_reward(
+        self,
+        new_x: torch.Tensor,
+        new_y: torch.Tensor,
+        active_action: torch.Tensor,
+    ) -> torch.Tensor:
+        reward = torch.zeros((self.num_envs,), dtype=self.dtype, device=self.device)
+        step_scale = float(getattr(self.config, "seed_proximity_reward_per_step", 0.0))
+        if step_scale <= 0.0:
+            return reward
+
+        seed_mask_flat = self.seed_grid.view(self.num_envs, -1) > 0
+        has_seed = seed_mask_flat.any(dim=1)
+        candidate = active_action & has_seed
+        if not torch.any(candidate):
+            return reward
+
+        candidate_seed_mask = seed_mask_flat[candidate]
+        cell_x = self.seed_cell_x.unsqueeze(0)
+        cell_y = self.seed_cell_y.unsqueeze(0)
+        max_distance = self.width + self.height + 1
+
+        new_distance = torch.abs(new_x[candidate].unsqueeze(1) - cell_x) + torch.abs(
+            new_y[candidate].unsqueeze(1) - cell_y
+        )
+
+        new_nearest = torch.where(candidate_seed_mask, new_distance, max_distance).min(dim=1).values
+        max_manhattan = max(1, (self.width - 1) + (self.height - 1))
+        closeness = (
+            (float(max_manhattan) - new_nearest.to(self.dtype)) / float(max_manhattan)
+        ).clamp(min=0.0, max=1.0)
+        reward[candidate] = closeness * step_scale
+        return reward
 
     def _spawn_agents(self) -> None:
         positions = torch.stack(

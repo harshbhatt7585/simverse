@@ -13,4 +13,5 @@ class FarmtilaConfig:
     max_steps: int = 10000
     total_seeds_per_episode: int = 500
     max_farm_level: int = 2
+    seed_proximity_reward_per_step: float = 0.02
     policies: List[Any] = field(default_factory=list)

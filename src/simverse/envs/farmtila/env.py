@@ -81,6 +81,7 @@ class FarmtilaEnv(SimEnv):
                 new_x = int(np.clip(agent.position[0] + dx, 0, self.config.width - 1))
                 new_y = int(np.clip(agent.position[1] + dy, 0, self.config.height - 1))
                 agent.position = (new_x, new_y)
+                reward += self._seed_proximity_reward(agent.position)
                 if action == self.HARVEST_ACTION:
                     reward += self._plant_farm(agent)
                 if self._collect_seed_if_present(agent):
@@ -219,6 +220,25 @@ class FarmtilaEnv(SimEnv):
             self.last_pickups.append((agent.agent_id, x, y))
             return True
         return False
+
+    def _nearest_seed_distance(self, position: Tuple[int, int]) -> int | None:
+        seed_positions = np.argwhere(self.seed_grid > 0)
+        if seed_positions.size == 0:
+            return None
+        pos_x, pos_y = position
+        distances = np.abs(seed_positions[:, 0] - pos_x) + np.abs(seed_positions[:, 1] - pos_y)
+        return int(distances.min())
+
+    def _seed_proximity_reward(self, current_position: Tuple[int, int]) -> float:
+        step_scale = float(getattr(self.config, "seed_proximity_reward_per_step", 0.0))
+        if step_scale <= 0.0:
+            return 0.0
+        current_distance = self._nearest_seed_distance(current_position)
+        if current_distance is None:
+            return 0.0
+        max_distance = max(1, (self.config.width - 1) + (self.config.height - 1))
+        closeness = (max_distance - current_distance) / max_distance
+        return float(np.clip(closeness, 0.0, 1.0) * step_scale)
 
     def _plant_farm(self, agent: FarmtilaAgent) -> float:
         if agent.inventory <= 0:

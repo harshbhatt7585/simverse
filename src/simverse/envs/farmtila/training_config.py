@@ -36,12 +36,10 @@ def build_training_config(
 
     resolved_num_envs = num_envs
     if resolved_device == "mps":
-        resolved_num_envs = min(resolved_num_envs, 512)
+        resolved_num_envs = min(resolved_num_envs, 128)
 
     resolved_buffer_size = (
-        buffer_size
-        if buffer_size is not None
-        else resolved_num_envs * num_agents * 10
+        buffer_size if buffer_size is not None else resolved_num_envs * num_agents * 10
     )
     resolved_batch_size = (
         batch_size

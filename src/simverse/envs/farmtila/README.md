@@ -46,3 +46,7 @@ Each agent observes the full environment state (as a 5-channel grid):
 3. `farm_grid` (farm levels)
 4. `agent_grid` (agent positions)
 5. `inventory_grid` (inventory values at agent positions)
+
+
+## Rewards
+1. Agent gets small reward as it get close the seed
