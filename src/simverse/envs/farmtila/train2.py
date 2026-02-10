@@ -17,6 +17,7 @@ from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.env import FarmtilaEnv, FarmtillaVectorizedEnv
+from simverse.envs.farmtila.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -46,24 +47,21 @@ def parse_args() -> argparse.Namespace:
 
 
 def train(use_wandb: bool = True):
-    training_config = {
-        "width": 20,
-        "height": 20,
-        "num_agents": 4,
-        "num_envs": 256,
-        "max_steps": 1000,
-        "episodes": 100,
-        "training_epochs": 1,
-        "lr": 0.001,
-        "clip_epsilon": 0.2,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "total_seeds": 500,
-        "batch_size": 512,
-        "buffer_size": 50000,
-        "device": "cuda",
-        "dtype": torch.float32,
-    }
+    training_config = build_training_config(
+        num_agents=4,
+        num_envs=256,
+        max_steps=1000,
+        episodes=100,
+        training_epochs=1,
+        lr=0.001,
+        clip_epsilon=0.2,
+        gamma=0.99,
+        gae_lambda=0.95,
+        total_seeds=500,
+        batch_size=512,
+        buffer_size=50000,
+        dtype=torch.float32,
+    )
 
     config = FarmtilaConfig(
         width=training_config["width"],

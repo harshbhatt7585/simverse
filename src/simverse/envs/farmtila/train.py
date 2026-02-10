@@ -18,6 +18,7 @@ from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.env import FarmtilaEnv
 from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
+from simverse.envs.farmtila.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -47,38 +48,21 @@ def parse_args() -> argparse.Namespace:
 
 
 def train(use_wandb: bool = True):
-    # Training hyperparameters
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = "mps"
-    else:
-        device = "cpu"
-
-    num_agents = 4
-    num_envs = 2048
-    # Keep ~10 steps per env per agent in the replay buffer.
-    buffer_size = num_envs * num_agents * 10
-    batch_size = min(8192, buffer_size // max(num_agents, 1))
-
-    training_config = {
-        "width": 20,
-        "height": 20,
-        "num_agents": num_agents,
-        "num_envs": num_envs,
-        "max_steps": 1500,
-        "episodes": 100,
-        "training_epochs": 1,
-        "lr": 0.001,
-        "clip_epsilon": 0.2,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "total_seeds": 500,
-        "batch_size": batch_size,
-        "buffer_size": buffer_size,
-        "device": device,
-        "dtype": torch.float32,
-    }
+    training_config = build_training_config(
+        num_agents=4,
+        num_envs=2048,
+        max_steps=1500,
+        episodes=100,
+        training_epochs=1,
+        lr=0.001,
+        clip_epsilon=0.2,
+        gamma=0.99,
+        gae_lambda=0.95,
+        total_seeds=500,
+        batch_size=None,
+        buffer_size=None,
+        dtype=torch.float32,
+    )
 
     config = FarmtilaConfig(
         width=training_config["width"],
