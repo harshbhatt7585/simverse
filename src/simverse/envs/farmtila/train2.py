@@ -60,7 +60,7 @@ def train(use_wandb: bool = True):
         total_seeds=500,
         batch_size=512,
         buffer_size=50000,
-        dtype=torch.float32,
+        dtype=torch.bfloat16,
     )
 
     config = FarmtilaConfig(
