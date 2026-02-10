@@ -75,6 +75,8 @@ class PPOTrainer(Trainer):
         self.batch_size = batch_size
         self.dtype = dtype
         self.env_batch_size = 1
+        self.entropy_coef = float(self.config.get("entropy_coef", 0.01))
+        self.normalize_advantages = bool(self.config.get("normalize_advantages", True))
         configured_fastpath = self.config.get("torch_fastpath")
         if configured_fastpath is None:
             # MPS often regresses with heavy indexed writes used by the tensor fastpath.
@@ -452,28 +454,41 @@ class PPOTrainer(Trainer):
             if observations.shape[0] == 0:
                 break
 
-            with torch.no_grad():
-                _, next_value = agent.policy(observations[-1].unsqueeze(0))
-                next_value_scalar = float(next_value.squeeze().item())
+            env_count = max(self.env_batch_size, 1)
+            sample_count = observations.shape[0]
+            usable_count = (sample_count // env_count) * env_count
+            if usable_count <= 0:
+                break
+            if usable_count != sample_count:
+                start = sample_count - usable_count
+                observations = observations[start:]
+                actions = actions[start:]
+                old_log_probs = old_log_probs[start:]
+                sampled_values = sampled_values[start:]
+                rewards = rewards[start:]
+                dones = dones[start:]
 
-            advantages = self.compute_gae(
-                rewards.detach().cpu().tolist(),
-                sampled_values.detach().cpu().tolist(),
-                next_value_scalar,
-                dones.detach().cpu().tolist(),
-            ).to(device=self.device, dtype=self.dtype)
+            advantages = self._compute_vectorized_gae(
+                rewards=rewards,
+                values=sampled_values,
+                dones=dones,
+                env_count=env_count,
+            )
+            if self.normalize_advantages and advantages.numel() > 1:
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             returns = advantages + sampled_values
 
             logits, value = agent.policy(observations)
             dist = torch.distributions.Categorical(logits=logits)
             log_prob = dist.log_prob(actions)
             ratio = torch.exp(log_prob - old_log_probs)
+            entropy = dist.entropy().mean()
 
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
             policy_loss = -torch.min(surr1, surr2).mean()
             value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
-            loss = policy_loss + 0.5 * value_loss
+            loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
 
             optimizer = self._get_optimizer(agent.agent_id)
             optimizer.zero_grad(set_to_none=True)
@@ -541,6 +556,50 @@ class PPOTrainer(Trainer):
             advantages.insert(0, gae)
 
         return torch.tensor(advantages, dtype=torch.float32)
+
+    def _compute_vectorized_gae(
+        self,
+        *,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+        dones: torch.Tensor,
+        env_count: int,
+    ) -> torch.Tensor:
+        total = int(rewards.shape[0])
+        if total <= 0:
+            return torch.empty(0, dtype=self.dtype, device=self.device)
+
+        usable = (total // env_count) * env_count
+        if usable <= 0:
+            return self.compute_gae(
+                rewards.detach().cpu().tolist(),
+                values.detach().cpu().tolist(),
+                0.0,
+                dones.detach().cpu().tolist(),
+            ).to(device=self.device, dtype=self.dtype)
+
+        if usable != total:
+            start = total - usable
+            rewards = rewards[start:]
+            values = values[start:]
+            dones = dones[start:]
+
+        rewards_seq = rewards.reshape(-1, env_count)
+        values_seq = values.reshape(-1, env_count)
+        dones_seq = dones.reshape(-1, env_count).to(dtype=torch.bool)
+
+        next_values = torch.zeros_like(values_seq)
+        if values_seq.shape[0] > 1:
+            next_values[:-1] = values_seq[1:]
+
+        advantages = torch.zeros_like(values_seq)
+        gae = torch.zeros(env_count, dtype=self.dtype, device=self.device)
+        for step in range(values_seq.shape[0] - 1, -1, -1):
+            non_terminal = (~dones_seq[step]).to(dtype=self.dtype)
+            delta = rewards_seq[step] + self.gamma * next_values[step] * non_terminal - values_seq[step]
+            gae = delta + self.gamma * self.gae_lambda * non_terminal * gae
+            advantages[step] = gae
+        return advantages.reshape(-1)
 
     def train(
         self,
@@ -794,7 +853,7 @@ class PPOTrainer(Trainer):
                         )
                         self.replay_buffer.add(experience)
                         self.stats.push_experience(experience)
-                    self.stats.step(batch_envs)
+                self.stats.step(batch_envs)
 
                 episode_reward += float(np.sum(reward_array_cpu))
                 episode_steps = step + 1
