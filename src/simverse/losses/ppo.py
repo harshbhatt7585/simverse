@@ -15,7 +15,7 @@ from simverse.utils.replay_buffer import Experience, ReplayBuffer
 try:
     import wandb
 
-    _WANDB_AVAILABLE = True
+    _WANDB_AVAILABLE = all(hasattr(wandb, attr) for attr in ("init", "log", "finish"))
 except ImportError:
     wandb = None
     _WANDB_AVAILABLE = False
@@ -511,8 +511,11 @@ class PPOTrainer(Trainer):
             wandb.init(project=self.project_name, name=self.run_name, config=self.config)
             self._wandb_initialized = True
         elif self.use_wandb:
+            imported_path = getattr(wandb, "__file__", None) if wandb is not None else None
+            suffix = f" (imported module: {imported_path})" if imported_path else ""
             training_logger.warning(
-                "Weights & Biases not available - install with: pip install wandb"
+                "Weights & Biases API unavailable. If installed, check for local module shadowing."
+                f"{suffix}"
             )
 
     def _finish_logging(self):

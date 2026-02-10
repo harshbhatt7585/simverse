@@ -1,5 +1,6 @@
 """PettingZoo Tennis environment package."""
 
-from .env import PettingZooTennisEnv
+from .config import TennisConfig
+from .env import PettingZooTennisEnv, TennisEnv
 
-__all__ = ["PettingZooTennisEnv"]
+__all__ = ["PettingZooTennisEnv", "TennisEnv", "TennisConfig"]
