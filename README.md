@@ -56,3 +56,23 @@ sim.train(
    ```bash
    pre-commit run --all-files
    ```
+
+## UV Setup (Recommended)
+1. Create a local virtual environment and install dependencies:
+   ```bash
+   ./scripts/setup_uv.sh dev
+   ```
+2. If you need Tennis/PettingZoo Atari support:
+   ```bash
+   ./scripts/setup_uv.sh all
+   ```
+3. Activate environment:
+   ```bash
+   source .venv/bin/activate
+   ```
+
+You can also run directly with `uv`:
+- `uv sync` (base)
+- `uv sync --extra dev` (base + dev)
+- `uv sync --extra pettingzoo` (base + PettingZoo)
+- `uv sync --extra dev --extra pettingzoo` (all)
