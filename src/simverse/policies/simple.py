@@ -45,6 +45,9 @@ class SimplePolicy(Policy):
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         if obs.dim() == 3:
             obs = obs.unsqueeze(0)
+        target = self.fc1.weight
+        if obs.device != target.device or obs.dtype != target.dtype:
+            obs = obs.to(device=target.device, dtype=target.dtype)
         x = self.obs_encoder(obs)
         x = F.relu(self.fc1(x))
 

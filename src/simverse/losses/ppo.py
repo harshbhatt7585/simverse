@@ -102,7 +102,7 @@ class PPOTrainer(Trainer):
         for agent in getattr(self, "agents", []):
             policy = getattr(agent, "policy", None)
             if policy is not None:
-                policy.to(self.device)
+                policy.to(device=self.device, dtype=self.dtype)
 
     def _env_metadata(self) -> Dict[str, Any]:
         if self._env_metadata_cache is not None:
