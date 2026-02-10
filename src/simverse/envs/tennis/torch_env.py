@@ -41,6 +41,10 @@ class TennisTorchEnv(SimTorchEnv):
     def observation_space(self):
         return self.envs[0].observation_space
 
+    @property
+    def local_observation_space(self):
+        return self.envs[0].local_observation_space
+
     def assign_agents(self, agents: list[TennisAgent]) -> None:
         if len(agents) != self.config.num_agents:
             raise ValueError(f"Tennis requires {self.config.num_agents} agents")
@@ -130,7 +134,12 @@ class TennisTorchEnv(SimTorchEnv):
         self, observations: list[Dict[str, Any]]
     ) -> Dict[str, torch.Tensor]:
         obs_array = np.stack([obs["obs"] for obs in observations], axis=0)
+        local_obs_array = np.stack([obs["local_obs"] for obs in observations], axis=0)
         obs_tensor = torch.from_numpy(obs_array).to(device=self.device, dtype=self.dtype)
+        local_obs_tensor = torch.from_numpy(local_obs_array).to(
+            device=self.device,
+            dtype=self.dtype,
+        )
         done = torch.as_tensor(
             [bool(obs.get("done", False)) for obs in observations],
             dtype=torch.bool,
@@ -151,6 +160,7 @@ class TennisTorchEnv(SimTorchEnv):
         )
         return {
             "obs": obs_tensor,
+            "local_obs": local_obs_tensor,
             "done": done,
             "winner": winner,
             "steps": steps,

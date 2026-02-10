@@ -19,6 +19,7 @@ from simverse.envs.tennis.config import TennisConfig
 from simverse.envs.tennis.torch_env import TennisTorchEnv
 from simverse.envs.tennis.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
+from simverse.policies.centralized_critic import CentralizedCritic
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
 
@@ -69,6 +70,8 @@ def train(use_wandb: bool = True, num_envs: int = 64) -> None:
         buffer_size=None,
         dtype=torch.bfloat16,
     )
+    training_config["ctde"] = True
+    training_config["torch_fastpath"] = True
 
     config = TennisConfig(
         num_agents=training_config["num_agents"],
@@ -86,11 +89,15 @@ def train(use_wandb: bool = True, num_envs: int = 64) -> None:
         dtype=training_config["dtype"],
     )
 
+    actor_obs_space = (
+        env.local_observation_space if training_config["ctde"] else env.observation_space
+    )
+
     policy_specs = [
         PolicySpec(
             name=f"simple_agent_{agent_id}",
             model=SimplePolicy(
-                obs_space=env.observation_space,
+                obs_space=actor_obs_space,
                 action_space=env.action_space,
             ),
         )
@@ -103,11 +110,20 @@ def train(use_wandb: bool = True, num_envs: int = 64) -> None:
         agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=training_config["lr"])
         for agent_id in range(training_config["num_agents"])
     }
+    centralized_critic = CentralizedCritic(obs_space=env.observation_space)
+    centralized_critic_optimizer = torch.optim.Adam(
+        centralized_critic.parameters(),
+        lr=training_config["lr"],
+    )
 
     stats = TrainingStats()
 
     loss_trainer = PPOTrainer(
         optimizers=optimizers,
+        centralized_critic=centralized_critic if training_config["ctde"] else None,
+        centralized_critic_optimizer=(
+            centralized_critic_optimizer if training_config["ctde"] else None
+        ),
         episodes=training_config["episodes"],
         training_epochs=training_config["training_epochs"],
         clip_epsilon=training_config["clip_epsilon"],

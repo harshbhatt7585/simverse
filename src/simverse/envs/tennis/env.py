@@ -131,6 +131,11 @@ class TennisEnv(SimEnv):
 
         sample_space = self._raw_env._env.observation_space(self._agent_names[0])
         channels = 1 if self.config.use_grayscale else int(sample_space.shape[2])
+        self._single_agent_obs_shape = (
+            channels,
+            self.config.obs_resize,
+            self.config.obs_resize,
+        )
         self._obs_shape = (
             channels * self.config.num_agents,
             self.config.obs_resize,
@@ -140,6 +145,12 @@ class TennisEnv(SimEnv):
             low=0.0,
             high=1.0,
             shape=self._obs_shape,
+            dtype=np.float32,
+        )
+        self._local_observation_space = gym.spaces.Box(
+            low=0.0,
+            high=1.0,
+            shape=self._single_agent_obs_shape,
             dtype=np.float32,
         )
         action_n = int(self._raw_env._env.action_space(self._agent_names[0]).n)
@@ -152,6 +163,10 @@ class TennisEnv(SimEnv):
     @property
     def observation_space(self):
         return self._observation_space
+
+    @property
+    def local_observation_space(self):
+        return self._local_observation_space
 
     def assign_agents(self, agents: list[TennisAgent]) -> None:
         if len(agents) != self.config.num_agents:
@@ -182,7 +197,7 @@ class TennisEnv(SimEnv):
             agent_name = self._agent_names[agent.agent_id]
             raw_obs = observations.get(agent_name)
             if raw_obs is None:
-                proc = np.zeros(self._obs_shape, dtype=np.float32)
+                proc = np.zeros(self._single_agent_obs_shape, dtype=np.float32)
             else:
                 proc = _process_observation(
                     raw_obs,
@@ -193,11 +208,17 @@ class TennisEnv(SimEnv):
             agent_info.append(agent.info())
 
         if stacked:
+            local_obs = np.stack(stacked, axis=0)
             obs_tensor = np.concatenate(stacked, axis=0)
         else:
+            local_obs = np.zeros(
+                (self.config.num_agents, *self._single_agent_obs_shape),
+                dtype=np.float32,
+            )
             obs_tensor = np.zeros(self._obs_shape, dtype=np.float32)
         return {
             "obs": obs_tensor,
+            "local_obs": local_obs,
             "agents": agent_info,
             "done": self.done,
             "winner": self.winner,
@@ -294,10 +315,12 @@ class TennisVectorizedEnv(SimVectorEnv):
 
     def _stack_observations(self, observations: list[Dict[str, Any]]) -> Dict[str, Any]:
         obs_tensor = np.stack([obs["obs"] for obs in observations], axis=0)
+        local_obs = np.stack([obs["local_obs"] for obs in observations], axis=0)
         steps = np.asarray([obs.get("steps", 0) for obs in observations], dtype=np.int32)
         done_flags = np.asarray([obs.get("done", False) for obs in observations], dtype=np.bool_)
         return {
             "obs": obs_tensor,
+            "local_obs": local_obs,
             "agents": [obs.get("agents", []) for obs in observations],
             "done": done_flags,
             "winner": [obs.get("winner") for obs in observations],

@@ -30,6 +30,8 @@ class PPOTrainer(Trainer):
         self,
         optimizer: Optional[torch.optim.Optimizer] = None,
         optimizers: Optional[Dict[int, torch.optim.Optimizer]] = None,
+        centralized_critic: Optional[torch.nn.Module] = None,
+        centralized_critic_optimizer: Optional[torch.optim.Optimizer] = None,
         episodes: int = 1,
         training_epochs: int = 4,
         clip_epsilon: float = 0.2,
@@ -57,6 +59,8 @@ class PPOTrainer(Trainer):
 
         self.optimizer = optimizer
         self.optimizers = optimizers or {}
+        self.centralized_critic = centralized_critic
+        self.centralized_critic_optimizer = centralized_critic_optimizer
         self.replay_buffer = ReplayBuffer(buffer_size)
         self.episodes = episodes
         self.training_epochs = training_epochs
@@ -77,6 +81,11 @@ class PPOTrainer(Trainer):
         self.env_batch_size = 1
         self.entropy_coef = float(self.config.get("entropy_coef", 0.01))
         self.normalize_advantages = bool(self.config.get("normalize_advantages", True))
+        self.use_ctde = bool(self.config.get("ctde", False))
+        if self.use_ctde and self.centralized_critic is None:
+            raise ValueError("CTDE requires a centralized_critic model")
+        if self.use_ctde and self.centralized_critic_optimizer is None:
+            raise ValueError("CTDE requires a centralized_critic_optimizer")
         configured_fastpath = self.config.get("torch_fastpath")
         if configured_fastpath is None:
             # MPS often regresses with heavy indexed writes used by the tensor fastpath.
@@ -103,6 +112,8 @@ class PPOTrainer(Trainer):
             policy = getattr(agent, "policy", None)
             if policy is not None:
                 policy.to(device=self.device, dtype=self.dtype)
+        if self.centralized_critic is not None:
+            self.centralized_critic.to(device=self.device, dtype=self.dtype)
 
     def _env_metadata(self) -> Dict[str, Any]:
         if self._env_metadata_cache is not None:
@@ -184,6 +195,43 @@ class PPOTrainer(Trainer):
         if isinstance(obs_array, torch.Tensor):
             return obs_array.to(self.device, dtype=self.dtype)
         return torch.from_numpy(obs_array).to(self.dtype).to(self.device)
+
+    def _prepare_local_obs_tensor(
+        self,
+        observation: Dict[str, Any],
+        batch_size: int,
+    ) -> torch.Tensor:
+        local_obs = observation.get("local_obs")
+        if local_obs is None:
+            global_obs = self._prepare_obs_tensor(observation)
+            return global_obs.unsqueeze(1).expand(
+                -1,
+                self.env.config.num_agents,
+                *global_obs.shape[1:],
+            )
+        if isinstance(local_obs, torch.Tensor):
+            local = local_obs.to(self.device, dtype=self.dtype)
+        elif isinstance(local_obs, np.ndarray):
+            local = torch.from_numpy(local_obs).to(self.device, dtype=self.dtype)
+        else:
+            local = torch.as_tensor(local_obs, device=self.device, dtype=self.dtype)
+        if local.dim() == 4:
+            local = local.unsqueeze(0)
+        if local.shape[0] != batch_size:
+            raise ValueError(
+                f"Expected local_obs batch size {batch_size}, received {int(local.shape[0])}"
+            )
+        return local
+
+    def _critic_value(self, global_observation: torch.Tensor) -> torch.Tensor:
+        if self.centralized_critic is None:
+            raise RuntimeError("Centralized critic is not configured")
+        value = self.centralized_critic(global_observation)
+        if isinstance(value, tuple):
+            value = value[-1]
+        if value.dim() == 1:
+            value = value.unsqueeze(-1)
+        return value.to(dtype=self.dtype, device=self.device)
 
     def _batch_size_from_obs(self, observation: Dict[str, Any]) -> int:
         return int(self._obs_batch_array(observation).shape[0])
@@ -273,8 +321,19 @@ class PPOTrainer(Trainer):
         else:
             env_steps = int(steps_field) if steps_field is not None else 0
 
+        local_obs_field = observation.get("local_obs")
+        if isinstance(local_obs_field, torch.Tensor):
+            env_local_obs = local_obs_field[env_idx]
+        elif isinstance(local_obs_field, np.ndarray):
+            env_local_obs = local_obs_field[env_idx]
+        elif isinstance(local_obs_field, (list, tuple)) and len(local_obs_field) > env_idx:
+            env_local_obs = local_obs_field[env_idx]
+        else:
+            env_local_obs = None
+
         return {
             "obs": env_obs,
+            "local_obs": env_local_obs,
             "agents": env_agents,
             "done": env_done,
             "winner": env_winner,
@@ -325,7 +384,11 @@ class PPOTrainer(Trainer):
             return done_array.to(device=self.device, dtype=torch.bool)
         return torch.as_tensor(done_array, device=self.device, dtype=torch.bool)
 
-    def _ensure_tensor_buffers(self, obs_shape: tuple[int, ...]) -> None:
+    def _ensure_tensor_buffers(
+        self,
+        obs_shape: tuple[int, ...],
+        global_obs_shape: tuple[int, ...] | None = None,
+    ) -> None:
         if not self.agents:
             return
         num_agents = max(len(self.agents), 1)
@@ -358,6 +421,14 @@ class PPOTrainer(Trainer):
                 "reward": torch.empty((capacity,), dtype=self.dtype, device=self.device),
                 "done": torch.empty((capacity,), dtype=torch.bool, device=self.device),
             }
+            if self.use_ctde:
+                if global_obs_shape is None:
+                    raise ValueError("CTDE requires global observation shape for tensor buffers")
+                self._tensor_buffers[agent_id]["global_obs"] = torch.empty(
+                    (capacity, *global_obs_shape),
+                    dtype=self.dtype,
+                    device=self.device,
+                )
             self._tensor_buffer_sizes[agent_id] = 0
             self._tensor_buffer_ptrs[agent_id] = 0
 
@@ -366,6 +437,7 @@ class PPOTrainer(Trainer):
         agent_id: int,
         *,
         obs: torch.Tensor,
+        global_obs: torch.Tensor | None = None,
         action: torch.Tensor,
         log_prob: torch.Tensor,
         value: torch.Tensor,
@@ -388,6 +460,8 @@ class PPOTrainer(Trainer):
             value = value[start:]
             reward = reward[start:]
             done = done[start:]
+            if global_obs is not None:
+                global_obs = global_obs[start:]
             batch_size = capacity
 
         ptr = self._tensor_buffer_ptrs[agent_id]
@@ -398,6 +472,10 @@ class PPOTrainer(Trainer):
         buffer["value"].index_copy_(0, indices, value[:batch_size])
         buffer["reward"].index_copy_(0, indices, reward[:batch_size])
         buffer["done"].index_copy_(0, indices, done[:batch_size])
+        if self.use_ctde:
+            if global_obs is None:
+                raise ValueError("CTDE requires global_obs when adding tensor buffer data")
+            buffer["global_obs"].index_copy_(0, indices, global_obs[:batch_size])
 
         self._tensor_buffer_ptrs[agent_id] = (ptr + batch_size) % capacity
         self._tensor_buffer_sizes[agent_id] = min(
@@ -439,6 +517,8 @@ class PPOTrainer(Trainer):
         if agent.policy is None:
             return
         agent.policy.train()
+        if self.use_ctde and self.centralized_critic is not None:
+            self.centralized_critic.train()
 
         for epoch in range(self.training_epochs):
             batch = self._tensor_buffer_sample(agent.agent_id, self.batch_size)
@@ -451,6 +531,7 @@ class PPOTrainer(Trainer):
             sampled_values = batch["value"]
             rewards = batch["reward"]
             dones = batch["done"]
+            sampled_global_obs = batch.get("global_obs")
             if observations.shape[0] == 0:
                 break
 
@@ -467,6 +548,8 @@ class PPOTrainer(Trainer):
                 sampled_values = sampled_values[start:]
                 rewards = rewards[start:]
                 dones = dones[start:]
+                if sampled_global_obs is not None:
+                    sampled_global_obs = sampled_global_obs[start:]
 
             advantages = self._compute_vectorized_gae(
                 rewards=rewards,
@@ -487,13 +570,29 @@ class PPOTrainer(Trainer):
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
             policy_loss = -torch.min(surr1, surr2).mean()
-            value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
-            loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
+            if self.use_ctde:
+                value_loss = torch.zeros((), dtype=self.dtype, device=self.device)
+                loss = policy_loss - self.entropy_coef * entropy
+            else:
+                value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
+                loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
 
             optimizer = self._get_optimizer(agent.agent_id)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
+
+            if self.use_ctde:
+                if sampled_global_obs is None:
+                    raise ValueError("CTDE requires global_obs in sampled tensor batch")
+                if self.centralized_critic_optimizer is None:
+                    raise RuntimeError("Missing centralized critic optimizer for CTDE")
+                predicted_values = self._critic_value(sampled_global_obs).squeeze(-1)
+                critic_loss = 0.5 * (returns.detach() - predicted_values).pow(2).mean()
+                self.centralized_critic_optimizer.zero_grad(set_to_none=True)
+                critic_loss.backward()
+                self.centralized_critic_optimizer.step()
+                value_loss = critic_loss.detach()
 
             training_logger.log_epoch(
                 epoch, self.training_epochs, policy_loss.item(), value_loss.item()
@@ -665,9 +764,16 @@ class PPOTrainer(Trainer):
             for step in range(self.env.config.max_steps):
                 obs_tensor = self._prepare_obs_tensor(obs)
                 batch_envs = obs_tensor.shape[0]
+                local_obs_tensor = self._prepare_local_obs_tensor(obs, batch_envs)
 
                 if use_torch_fastpath:
-                    self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
+                    if self.use_ctde:
+                        self._ensure_tensor_buffers(
+                            tuple(local_obs_tensor.shape[2:]),
+                            global_obs_shape=tuple(obs_tensor.shape[1:]),
+                        )
+                    else:
+                        self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
                     collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
                     env_actions = torch.zeros(
                         (batch_envs, self.env.config.num_agents),
@@ -679,8 +785,14 @@ class PPOTrainer(Trainer):
                         agent.policy.eval()
 
                     with torch.no_grad():
+                        centralized_values: torch.Tensor | None = None
+                        if self.use_ctde:
+                            centralized_values = self._critic_value(obs_tensor).squeeze(-1).detach()
                         for agent in self.agents:
-                            logits, value = agent.policy(obs_tensor)
+                            actor_obs = (
+                                local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
+                            )
+                            logits, value = agent.policy(actor_obs)
                             dist = torch.distributions.Categorical(logits=logits)
                             action = dist.sample()
                             log_prob = dist.log_prob(action)
@@ -688,7 +800,11 @@ class PPOTrainer(Trainer):
                             collected_agent_data[agent.agent_id] = {
                                 "action": action.detach(),
                                 "log_prob": log_prob.detach(),
-                                "value": value.squeeze(-1).detach(),
+                                "value": (
+                                    centralized_values
+                                    if centralized_values is not None
+                                    else value.squeeze(-1).detach()
+                                ),
                             }
                             env_actions[:, agent.agent_id] = action.detach()
 
@@ -720,9 +836,13 @@ class PPOTrainer(Trainer):
                     obs_batch = obs_tensor.detach()
                     done_batch = done_tensor.detach()
                     for agent_id, agent_data in collected_agent_data.items():
+                        actor_obs_batch = (
+                            local_obs_tensor[:, agent_id].detach() if self.use_ctde else obs_batch
+                        )
                         self._tensor_buffer_add(
                             agent_id,
-                            obs=obs_batch,
+                            obs=actor_obs_batch,
+                            global_obs=obs_batch if self.use_ctde else None,
                             action=agent_data["action"],
                             log_prob=agent_data["log_prob"],
                             value=agent_data["value"],
@@ -774,6 +894,11 @@ class PPOTrainer(Trainer):
                     if bool(done_tensor.all().item()):
                         break
                     continue
+
+                if self.use_ctde:
+                    raise RuntimeError(
+                        "CTDE currently requires torch fastpath. Set config['torch_fastpath']=True."
+                    )
 
                 actions_per_env: List[Dict[int, int]] | None = None
                 action_tensors: List[torch.Tensor] = []
