@@ -74,7 +74,7 @@ class FarmtilaEnv(SimEnv):
         action_map = self._normalize_actions(actions)
         self.last_pickups = []
         for agent in self.agents:
-            reward = -0.01
+            reward = -0.005
             action = action_map.get(agent.agent_id)
             if action is not None:
                 dx, dy = self._action_to_delta(action)
