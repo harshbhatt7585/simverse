@@ -33,20 +33,29 @@ def build_training_config(
     dtype: torch.dtype = torch.float32,
 ) -> Dict[str, Any]:
     resolved_device = device or select_device()
+
+    resolved_num_envs = num_envs
+    if resolved_device == "mps":
+        resolved_num_envs = min(resolved_num_envs, 512)
+
     resolved_buffer_size = (
-        buffer_size if buffer_size is not None else num_envs * num_agents * 10
+        buffer_size
+        if buffer_size is not None
+        else resolved_num_envs * num_agents * 10
     )
     resolved_batch_size = (
         batch_size
         if batch_size is not None
         else min(8192, resolved_buffer_size // max(num_agents, 1))
     )
+    if resolved_device == "mps":
+        resolved_batch_size = min(resolved_batch_size, 2048)
 
     return {
         "width": width,
         "height": height,
         "num_agents": num_agents,
-        "num_envs": num_envs,
+        "num_envs": resolved_num_envs,
         "max_steps": max_steps,
         "episodes": episodes,
         "training_epochs": training_epochs,
