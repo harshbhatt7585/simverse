@@ -125,7 +125,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
             device=self.device,
         )
         active_mask = ~self.done
-        rewards += (-0.01) * active_mask.unsqueeze(1).to(self.dtype)
+        rewards += (-0.005) * active_mask.unsqueeze(1).to(self.dtype)
 
         delta_x = self.delta_x
         delta_y = self.delta_y
