@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
 
 def train(use_wandb: bool = True):
     training_config = build_training_config(
-        num_agents=4,
+        num_agents=2,
         num_envs=2048,
         max_steps=1500,
         episodes=100,

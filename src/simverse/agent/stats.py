@@ -131,7 +131,6 @@ class TrainingStats:
         # Episode-level rewards
         if self.episode_rewards:
             payload["episode/reward"] = self.episode_rewards[-1]
-            payload["episode/avg_reward"] = sum(self.episode_rewards) / len(self.episode_rewards)
         if self.episode_steps:
             payload["episode/steps"] = self.episode_steps[-1]
         if self.episode_harvested_tiles:

@@ -1,73 +1,63 @@
-# Farmtila
+# Farmtila (Competitive v1)
 
-Farmtila is a grid-based multi-agent RL environment where agents collect seeds, build territory, unlock 3x3 regions, and then harvest unlocked land.
+Farmtila is now a simple 1v1 competitive environment designed for easy self-play training and direct policy comparison.
 
-- Seeds spawn randomly across the map at the start of the simulation and again every **X** total agent steps.
-- Agents automatically collect seeds by stepping on them.
-- Land progression has two stages:
-1. Claim territory cells (locked) by spending seeds.
-2. Complete a 3x3 claimed block to unlock it, then spend more seeds to harvest unlocked cells.
+## Core Idea
+
+Two agents collect seeds, then spend seeds to claim or steal tiles.
+Final score is number of owned tiles at episode end.
 
 ## Action Space
 
-Discrete (6)
+Discrete (6):
 
-0. move up
-1. move down
-2. move left
-3. move right
-4. land action (claim territory / harvest unlocked land)
-5. optional pickup/no-op (seeds are still auto-collected on entry)
+1. `0` move up
+2. `1` move down
+3. `2` move left
+4. `3` move right
+5. `4` claim/steal tile (costs 1 seed)
+6. `5` pickup/no-op (seeds are auto-collected on entry)
 
-## Grid World
+## State Layers
 
-- Size: `W × H`
+Observation has 5 channels:
 
-## World Layers
+1. `seed_grid`: `0/1` seed presence
+2. `owner_grid`: `-1` unclaimed, `0/1` owner id
+3. `farm_grid`: binary claimed mask (`0` empty, `1` claimed)
+4. `agent_grid`: agent positions
+5. `inventory_grid`: seeds currently held by agents
 
-### Seed grid
+## Competitive Rules
 
-- `seed_grid[x, y] ∈ {0, 1}` — `1` indicates a seed is present in that cell
+1. Exactly 2 agents (symmetric start).
+2. Stepping on seed collects it automatically.
+3. Action `4` on a non-owned tile spends 1 seed and sets ownership to acting agent.
+4. If tile was opponent-owned, it is stolen.
+5. Episode ends at `max_steps` or when seed budget is exhausted, map has no seeds, and both inventories are empty.
 
-### Land ownership
+## Rewards (Zero-Sum)
 
-- `owner_grid[x, y] ∈ {-1, 0..N-1}`
-- `-1` means unclaimed, `i` means the cell belongs to agent `i`
+Rewards are explicitly zero-sum:
 
-### Land state
+1. Per-step reward uses score-delta shaping:
+- `score_delta = tiles_agent0 - tiles_agent1`
+- each step gives reward based on change in this delta
+- agent1 reward is exact negative of agent0 reward
+2. Terminal reward:
+- winner gets `+terminal_win_reward`
+- loser gets `-terminal_win_reward`
+- draw gets `0`
 
-- `farm_grid[x, y]` uses layered land states:
-1. `0` = empty
-2. `1` = territory claimed (locked)
-3. `2` = territory unlocked (part of a completed 3x3 block)
-4. `3` = harvested
+This makes competition clear and measurable.
 
-### Agent position
+## Win / Draw
 
-- `pos[i] = (x, y)`
+- Win: own more tiles than opponent at episode end.
+- Draw: both own the same number of tiles.
 
-## Observation Space
+## Recommended Training Setup
 
-Each agent observes the full environment state (as a 5-channel grid):
-
-1. `seed_grid`
-2. `owner_grid`
-3. `farm_grid` (land stage: empty/locked/unlocked/harvested)
-4. `agent_grid` (agent positions)
-5. `inventory_grid` (inventory values at agent positions)
-
-
-## Rewards
-1. Seed pickup: `+1.0`
-2. Seed proximity shaping: small reward each step based on closeness to nearest seed
-3. Step cost: `-0.005`
-4. Claim empty land with seed: `+0.1`
-5. Complete and unlock a full 3x3 owned territory block: `+5.0`
-6. Spend seed on unlocked owned tile to harvest it: `+1.0`
-7. If a newly claimed territory cell is adjacent to already harvested owned land, step cost is waived for that action.
-8. First agent to harvest `3` land tiles wins and gets `+50.0`.
-
-## Win and Draw Conditions
-
-- Win: first agent that reaches `harvest_goal` (default `3`) harvested tiles.
-- Draw: if no agent reaches the goal before episode end (`max_steps` or seed budget exhaustion).
+1. Self-play with opponent pool (past checkpoints).
+2. Fixed map size (for example `16x16`).
+3. Evaluate with cross-play matrix and win-rate/Elo.

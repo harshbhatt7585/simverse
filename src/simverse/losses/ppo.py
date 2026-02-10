@@ -643,9 +643,16 @@ class PPOTrainer(Trainer):
             else:
                 record_env_idx = None
             use_torch_fastpath = isinstance(self.env, SimTorchEnv) and self.enable_torch_fastpath
+            competitive_zero_sum = hasattr(self.env.config, "score_delta_reward")
             episode_reward = 0.0
             episode_reward_tensor = (
                 torch.zeros((), dtype=self.dtype, device=self.device)
+                if use_torch_fastpath
+                else None
+            )
+            episode_agent_reward = np.zeros((self.env.config.num_agents,), dtype=np.float64)
+            episode_agent_reward_tensor = (
+                torch.zeros((self.env.config.num_agents,), dtype=self.dtype, device=self.device)
                 if use_torch_fastpath
                 else None
             )
@@ -723,6 +730,8 @@ class PPOTrainer(Trainer):
 
                     if episode_reward_tensor is not None:
                         episode_reward_tensor += reward_tensor.sum()
+                    if episode_agent_reward_tensor is not None:
+                        episode_agent_reward_tensor += reward_tensor.sum(dim=0)
                     episode_steps = step + 1
 
                     steps_this_iter = batch_envs * max(len(self.agents), 1)
@@ -741,7 +750,15 @@ class PPOTrainer(Trainer):
                             if episode_reward_tensor is not None
                             else episode_reward
                         )
-                        reward_per_env = reward_total / max(batch_envs, 1)
+                        if competitive_zero_sum:
+                            if episode_agent_reward_tensor is not None:
+                                reward_per_env = float(episode_agent_reward_tensor[0].item()) / max(
+                                    batch_envs, 1
+                                )
+                            else:
+                                reward_per_env = float(episode_agent_reward[0]) / max(batch_envs, 1)
+                        else:
+                            reward_per_env = reward_total / max(batch_envs, 1)
                         training_logger.log_step(
                             step + 1,
                             self.env.config.max_steps,
@@ -858,6 +875,7 @@ class PPOTrainer(Trainer):
                 self.stats.step(batch_envs)
 
                 episode_reward += float(np.sum(reward_array_cpu))
+                episode_agent_reward += reward_array_cpu.sum(axis=0, dtype=np.float64)
                 episode_steps = step + 1
 
                 steps_this_iter = batch_envs * max(len(self.agents), 1)
@@ -871,7 +889,10 @@ class PPOTrainer(Trainer):
                     steps_per_sec = delta_steps / delta_time
                     last_active_time = active_time
                     last_logged_steps = total_agent_steps
-                    reward_per_env = episode_reward / max(batch_envs, 1)
+                    if competitive_zero_sum:
+                        reward_per_env = float(episode_agent_reward[0]) / max(batch_envs, 1)
+                    else:
+                        reward_per_env = episode_reward / max(batch_envs, 1)
                     training_logger.log_step(
                         step + 1,
                         self.env.config.max_steps,
@@ -886,6 +907,8 @@ class PPOTrainer(Trainer):
 
             if episode_reward_tensor is not None:
                 episode_reward = float(episode_reward_tensor.item())
+            if episode_agent_reward_tensor is not None:
+                episode_agent_reward = episode_agent_reward_tensor.detach().cpu().numpy()
 
             # Clear the step progress line before training logs
             print()
@@ -970,7 +993,10 @@ class PPOTrainer(Trainer):
                         self.stats.log_wandb(step=self.stats.steps)
 
             env_count = max(self.env_batch_size, 1)
-            episode_reward_per_env = episode_reward / env_count
+            if competitive_zero_sum:
+                episode_reward_per_env = float(episode_agent_reward[0]) / env_count
+            else:
+                episode_reward_per_env = episode_reward / env_count
             avg_reward = episode_reward_per_env / max(episode_steps, 1)
             training_logger.end_episode(
                 episode + 1,
@@ -979,7 +1005,12 @@ class PPOTrainer(Trainer):
                 steps=episode_steps,
             )
 
-            self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
+            if competitive_zero_sum:
+                self.stats.push_reward(
+                    float(episode_agent_reward[0]), env_count=self.env_batch_size
+                )
+            else:
+                self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
             self.stats.push_episode_metrics(
                 steps=episode_steps,
                 harvested_tiles=self._episode_harvested_tiles(),

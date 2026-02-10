@@ -241,9 +241,6 @@ class TrainingLogger:
             f"    {Colors.DIM}├─{Colors.RESET} Total Reward: {reward_color}{total_reward:+.2f}{Colors.RESET}"
         )
         self._print(
-            f"    {Colors.DIM}├─{Colors.RESET} Avg Reward:   {Colors.WHITE}{avg_reward:.4f}{Colors.RESET}"
-        )
-        self._print(
             f"    {Colors.DIM}└─{Colors.RESET} Steps:        {Colors.WHITE}{steps}{Colors.RESET}"
         )
         self._print("")

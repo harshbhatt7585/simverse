@@ -34,7 +34,7 @@ def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAg
 
 def run():
     # Config
-    width, height, num_agents = 30, 20, 4
+    width, height, num_agents = 30, 20, 2
 
     # Create environment
     config = FarmtilaConfig(

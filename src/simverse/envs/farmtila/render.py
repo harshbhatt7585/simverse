@@ -707,7 +707,7 @@ class FarmtilaRender:
         config = FarmtilaConfig(
             width=env_config_data.get("width", self.width),
             height=env_config_data.get("height", self.height),
-            num_agents=env_config_data.get("num_agents", 4),
+            num_agents=env_config_data.get("num_agents", 2),
             spawn_seed_every=env_config_data.get("spawn_seed_every", 100),
             seeds_per_spawn=env_config_data.get("seeds_per_spawn", 10),
             max_steps=env_config_data.get("max_steps", 100),
@@ -846,7 +846,7 @@ class FarmtilaRender:
 
         # Stats background
         stats_width = int(self.cell_size * 4)
-        stats_height = int(self.cell_size * 2)
+        stats_height = int(self.cell_size * 2.4)
         stats_rect = pygame.Rect(12, stats_y, stats_width, stats_height)
 
         # Semi-transparent background
@@ -858,15 +858,16 @@ class FarmtilaRender:
 
         # Stats text
         seeds_count = int(np.sum(env.seed_grid > 0))
-        farms_count = int(np.sum(env.farm_grid > 0))
-
+        claimed_count = int(np.sum(env.farm_grid > 0))
         seed_text = self.small_font.render(f"🌱 Seeds: {seeds_count}", True, COLORS["ui_text"])
-        farm_text = self.small_font.render(f"🌾 Farms: {farms_count}", True, COLORS["ui_text"])
+        claimed_text = self.small_font.render(
+            f"🌾 Claimed: {claimed_count}", True, COLORS["ui_text"]
+        )
         step_text = self.small_font.render(f"⏱ Step: {env.steps}", True, COLORS["ui_text"])
 
         line_height = max(14, self.cell_size // 2)
         self.screen.blit(seed_text, (stats_rect.x + 8, stats_rect.y + 6))
-        self.screen.blit(farm_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height))
+        self.screen.blit(claimed_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height))
         self.screen.blit(step_text, (stats_rect.x + 8, stats_rect.y + 6 + line_height * 2))
 
     def _draw_winner_overlay(self, env: FarmtilaEnv):
@@ -942,7 +943,7 @@ class FarmtilaRender:
         self.screen.blit(name_surface, name_rect)
 
         # Stats
-        stats_text = f"🌾 {winner_tiles} farms harvested in {env.steps} steps"
+        stats_text = f"🌾 {winner_tiles} tiles claimed in {env.steps} steps"
         stats_surface = self.panel_font.render(stats_text, True, COLORS["ui_text"])
         stats_rect = stats_surface.get_rect(center=(cx, banner_y + banner_height * 3 // 4))
         self.screen.blit(stats_surface, stats_rect)
@@ -1195,11 +1196,13 @@ class FarmtilaRender:
 
         for x, y in farms:
             owner = int(env.owner_grid[x, y]) if env.owner_grid.size else 0
-            surface = self.farm_surfaces[owner % len(self.farm_surfaces)]
+            if owner < 0:
+                owner = 0
 
             px = int(x) * self.cell_size
             py = int(y) * self.cell_size
 
+            surface = self.farm_surfaces[owner % len(self.farm_surfaces)]
             self.screen.blit(surface, (px, py))
 
     def _get_agent_label_surface(self, idx: int) -> pygame.Surface:
@@ -1215,7 +1218,8 @@ class FarmtilaRender:
             if env.seed_grid[ax, ay] > 0:
                 actions[agent.agent_id] = env.PICKUP_ACTION
                 continue
-            if agent.inventory > 0 and env.farm_grid[ax, ay] == 0:
+            own_tile = int(env.owner_grid[ax, ay]) == int(agent.agent_id)
+            if agent.inventory > 0 and not own_tile:
                 actions[agent.agent_id] = env.HARVEST_ACTION
                 self._spawn_particles(
                     ax * self.cell_size + self.cell_size // 2,
@@ -1286,7 +1290,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Farmtila renderer")
     parser.add_argument("--width", type=int, default=30, help="Grid width")
     parser.add_argument("--height", type=int, default=20, help="Grid height")
-    parser.add_argument("--num-agents", type=int, default=4, help="Number of agents")
+    parser.add_argument("--num-agents", type=int, default=2, help="Number of agents")
     parser.add_argument("--cell-size", type=int, default=32, help="Cell size in pixels")
     parser.add_argument("--fps", type=int, default=30, help="Frames per second")
     parser.add_argument(
