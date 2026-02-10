@@ -577,32 +577,29 @@ class PPOTrainer(Trainer):
 
                 if use_torch_fastpath:
                     self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
-                    action_tensors: List[torch.Tensor] = []
                     collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
+                    env_actions = torch.zeros(
+                        (batch_envs, self.env.config.num_agents),
+                        dtype=torch.int64,
+                        device=self.env.device,
+                    )
 
                     for agent in self.agents:
                         agent.policy.eval()
-                        with torch.no_grad():
+
+                    with torch.no_grad():
+                        for agent in self.agents:
                             logits, value = agent.policy(obs_tensor)
                             dist = torch.distributions.Categorical(logits=logits)
                             action = dist.sample()
                             log_prob = dist.log_prob(action)
 
-                        collected_agent_data[agent.agent_id] = {
-                            "action": action.detach(),
-                            "log_prob": log_prob.detach(),
-                            "value": value.squeeze(-1).detach(),
-                        }
-                        action_tensors.append(action)
-
-                    if action_tensors:
-                        env_actions: torch.Tensor = torch.stack(action_tensors, dim=1)
-                    else:
-                        env_actions = torch.zeros(
-                            (batch_envs, self.env.config.num_agents),
-                            dtype=torch.int64,
-                            device=self.env.device,
-                        )
+                            collected_agent_data[agent.agent_id] = {
+                                "action": action.detach(),
+                                "log_prob": log_prob.detach(),
+                                "value": value.squeeze(-1).detach(),
+                            }
+                            env_actions[:, agent.agent_id] = action.detach()
 
                     obs, reward, done, info = self.env.step(env_actions)
                     reward_tensor = self._reward_to_tensor(reward, batch_envs)
