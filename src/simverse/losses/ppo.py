@@ -817,7 +817,7 @@ class PPOTrainer(Trainer):
                         info_list = self._ensure_info_list(info, batch_envs)
                         frame_obs = self._extract_env_observation(obs, env_to_record)
                         frame_reward = self._reward_row_to_dict(
-                            reward_tensor[env_to_record].detach().cpu().numpy()
+                            reward_tensor[env_to_record].detach().float().cpu().numpy()
                         )
                         frame_actions = {
                             agent_id: int(agent_data["action"][env_to_record].item())
