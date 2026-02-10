@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -11,6 +12,7 @@ import numpy as np
 from gymnasium import spaces
 
 from simverse.abstractor.simenv import SimEnv
+from simverse.abstractor.simvector_env import SimVectorEnv
 from simverse.envs.tennis.agent import TennisAgent
 from simverse.envs.tennis.config import TennisConfig
 
@@ -272,4 +274,60 @@ class TennisEnv(SimEnv):
         return self._build_observation_payload(observations)
 
 
-__all__ = ["PettingZooTennisEnv", "TennisEnv", "TennisConfig"]
+class TennisVectorizedEnv(SimVectorEnv):
+    """Runs multiple independent TennisEnv copies in lockstep."""
+
+    def __init__(self, config: TennisConfig, num_envs: int | None = None) -> None:
+        self.config = config
+        resolved_envs = num_envs or getattr(config, "num_envs", 1)
+        super().__init__(resolved_envs)
+
+    def _create_env(self, index: int) -> SimEnv:
+        return TennisEnv(deepcopy(self.config))
+
+    def _stack_rewards(self, reward_dicts: list[Dict[int, float]]) -> np.ndarray:
+        reward_array = np.zeros((self.num_envs, self.config.num_agents), dtype=np.float32)
+        for env_idx, rewards in enumerate(reward_dicts):
+            for agent_id in range(self.config.num_agents):
+                reward_array[env_idx, agent_id] = float(rewards.get(agent_id, 0.0))
+        return reward_array
+
+    def _stack_observations(self, observations: list[Dict[str, Any]]) -> Dict[str, Any]:
+        obs_tensor = np.stack([obs["obs"] for obs in observations], axis=0)
+        steps = np.asarray([obs.get("steps", 0) for obs in observations], dtype=np.int32)
+        done_flags = np.asarray([obs.get("done", False) for obs in observations], dtype=np.bool_)
+        return {
+            "obs": obs_tensor,
+            "agents": [obs.get("agents", []) for obs in observations],
+            "done": done_flags,
+            "winner": [obs.get("winner") for obs in observations],
+            "steps": steps,
+        }
+
+    def assign_agents(self, agents: list[TennisAgent]) -> None:
+        if len(agents) != self.config.num_agents:
+            raise ValueError(f"Tennis requires {self.config.num_agents} agents")
+        self.agents = agents
+
+        templates = {agent.agent_id: agent for agent in agents}
+        for env in self.envs:
+            env_agents: list[TennisAgent] = []
+            for agent_id in range(self.config.num_agents):
+                template = templates.get(agent_id)
+                policy = template.policy if template is not None else None
+                action_space = getattr(template, "action_space", None)
+                if not isinstance(action_space, np.ndarray):
+                    action_count = int(getattr(env.action_space, "n", 18))
+                    action_space = np.arange(action_count, dtype=np.int64)
+                env_agents.append(
+                    TennisAgent(
+                        agent_id=agent_id,
+                        action_space=action_space,
+                        policy=policy,
+                        name=f"tennis_agent_{agent_id}",
+                    )
+                )
+            env.assign_agents(env_agents)
+
+
+__all__ = ["PettingZooTennisEnv", "TennisEnv", "TennisVectorizedEnv", "TennisConfig"]

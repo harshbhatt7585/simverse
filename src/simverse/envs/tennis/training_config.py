@@ -16,6 +16,7 @@ def select_device() -> str:
 def build_training_config(
     *,
     num_agents: int = 2,
+    num_envs: int = 1,
     max_steps: int = 100_000,
     episodes: int = 100,
     training_epochs: int = 1,
@@ -45,7 +46,7 @@ def build_training_config(
 
     return {
         "num_agents": num_agents,
-        "num_envs": 1,
+        "num_envs": max(1, int(num_envs)),
         "max_steps": max_steps,
         "episodes": episodes,
         "training_epochs": training_epochs,

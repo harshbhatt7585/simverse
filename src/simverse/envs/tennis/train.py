@@ -16,14 +16,16 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.tennis.agent import TennisAgent
 from simverse.envs.tennis.config import TennisConfig
-from simverse.envs.tennis.env import TennisEnv
+from simverse.envs.tennis.env import TennisEnv, TennisVectorizedEnv
 from simverse.envs.tennis.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
 
 
-def agent_factory(agent_id: int, policy: Policy, env: TennisEnv) -> TennisAgent:
+def agent_factory(
+    agent_id: int, policy: Policy, env: TennisEnv | TennisVectorizedEnv
+) -> TennisAgent:
     action_values = np.arange(getattr(env.action_space, "n", 18), dtype=np.int64)
     return TennisAgent(
         agent_id=agent_id,
@@ -36,6 +38,12 @@ def agent_factory(agent_id: int, policy: Policy, env: TennisEnv) -> TennisAgent:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Tennis PPO agents")
     parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=8,
+        help="Number of parallel tennis environment copies to run",
+    )
+    parser.add_argument(
         "--wandb",
         choices=["on", "off"],
         default="on",
@@ -47,6 +55,7 @@ def parse_args() -> argparse.Namespace:
 def train(use_wandb: bool = True):
     training_config = build_training_config(
         num_agents=2,
+        num_envs=128,
         episodes=100,
         training_epochs=1,
         lr=0.0003,
@@ -60,7 +69,7 @@ def train(use_wandb: bool = True):
         use_grayscale=False,
         batch_size=None,
         buffer_size=None,
-        dtype=torch.float32,
+        dtype=torch.bfloat16,
     )
 
     config = TennisConfig(
@@ -72,7 +81,10 @@ def train(use_wandb: bool = True):
         use_grayscale=training_config["use_grayscale"],
         policies=[],
     )
-    env = TennisEnv(config=config)
+    if training_config["num_envs"] > 1:
+        env = TennisVectorizedEnv(config=config, num_envs=training_config["num_envs"])
+    else:
+        env = TennisEnv(config=config)
 
     policy_specs = [
         PolicySpec(
