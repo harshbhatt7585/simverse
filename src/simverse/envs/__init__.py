@@ -7,6 +7,8 @@ __all__: list[str] = []
 _KNOWN_ENVS = {
     "CartPoleEnv": "simverse.envs.cartpole",
     "PettingZooTennisEnv": "simverse.envs.tennis.env",
+    "ShapeDrawEnv": "simverse.envs.shape_draw.env",
+    "ShapeDrawVectorizedEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawTorchEnv": "simverse.envs.shape_draw.torch_env",
 }
 
