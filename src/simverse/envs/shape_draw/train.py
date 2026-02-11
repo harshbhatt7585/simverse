@@ -76,8 +76,8 @@ def train(
     )
 
     config = ShapeDrawConfig(
-        width=20,
-        height=20,
+        width=64,
+        height=64,
         num_agents=training_config["num_agents"],
         num_envs=training_config["num_envs"],
         max_steps=training_config["max_steps"],
