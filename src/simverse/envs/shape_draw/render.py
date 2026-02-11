@@ -77,14 +77,17 @@ class ShapeDrawRender:
             (10, self.canvas_width + 12),
         )
 
-    def _extract_canvas_target(self, frame: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    def _extract_obs_channels(
+        self,
+        frame: dict[str, Any],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         obs = frame.get("observation")
         if obs is None:
             raise ValueError("Replay frame has no 'observation' field")
         obs_arr = np.asarray(obs, dtype=np.float32)
-        if obs_arr.ndim != 3 or obs_arr.shape[0] < 2:
+        if obs_arr.ndim != 3 or obs_arr.shape[0] < 3:
             raise ValueError(f"Unexpected replay observation shape: {obs_arr.shape}")
-        return obs_arr[0], obs_arr[1]
+        return obs_arr[0], obs_arr[1], obs_arr[2]
 
     def load_replay(self, replay_path: str) -> None:
         data = json.loads(Path(replay_path).read_text())
@@ -95,7 +98,7 @@ class ShapeDrawRender:
         if not frames:
             raise ValueError("Replay file contains no frames")
 
-        first_canvas, _ = self._extract_canvas_target(frames[0])
+        first_canvas, _, _ = self._extract_obs_channels(frames[0])
         expected_shape = (self.size, self.size)
         if first_canvas.shape != expected_shape:
             raise ValueError(
@@ -134,17 +137,24 @@ class ShapeDrawRender:
                         self.replay.index = min(len(self.replay.frames) - 1, self.replay.index + 1)
 
             frame = self.replay.frames[self.replay.index]
-            canvas, target = self._extract_canvas_target(frame)
+            canvas, target, pen = self._extract_obs_channels(frame)
             step = int(frame.get("step", self.replay.index + 1))
+            actions = frame.get("actions", [])
+            action_value = "-"
+            if isinstance(actions, list) and actions:
+                first_action = actions[0]
+                if isinstance(first_action, dict) and "action" in first_action:
+                    action_value = str(first_action["action"])
             source_name = (
                 Path(self.replay.source_path).name if self.replay.source_path else "replay"
             )
             pause_tag = " [paused]" if paused else ""
             hud = (
                 f"{source_name} frame={self.replay.index + 1}/{len(self.replay.frames)} "
-                f"step={step}{pause_tag}"
+                f"step={step} action={action_value}{pause_tag}"
             )
-            self._draw_panels(target, canvas, hud)
+            canvas_with_pen = np.clip(canvas + 0.5 * pen, 0.0, 1.0)
+            self._draw_panels(target, canvas_with_pen, hud)
             pygame.display.flip()
 
             if not paused:
