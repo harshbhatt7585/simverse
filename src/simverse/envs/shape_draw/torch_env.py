@@ -43,6 +43,14 @@ class ShapeDrawTorchEnv(SimTorchEnv):
 
         self.register_buffer("canvas", torch.zeros(self.num_envs, 1, self.height, self.width))
         self.register_buffer("target", torch.zeros(self.num_envs, 1, self.height, self.width))
+        self.register_buffer(
+            "target_mask",
+            torch.zeros(self.num_envs, 1, self.height, self.width, dtype=torch.bool),
+        )
+        self.register_buffer(
+            "target_pixels",
+            torch.ones(self.num_envs, dtype=self.dtype),
+        )
         self.register_buffer("obs_buffer", torch.zeros(self.num_envs, 3, self.height, self.width))
         self.register_buffer("pen_x", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("pen_y", torch.zeros(self.num_envs, dtype=torch.int64))
@@ -81,6 +89,7 @@ class ShapeDrawTorchEnv(SimTorchEnv):
     def reset(self) -> Dict[str, torch.Tensor]:
         self.canvas.zero_()
         self.target.copy_(self._sample_targets())
+        self._cache_target_masks()
         self.pen_x.random_(0, self.width)
         self.pen_y.random_(0, self.height)
         self.pen_down.zero_()
@@ -100,7 +109,7 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         )
         active = ~self.done
 
-        prev_similarity = self.similarity.clone()
+        prev_canvas_mask = self.canvas > 0.5
 
         move_action = action_tensor[:, 0]
         self.pen_y = torch.where(
@@ -141,8 +150,11 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         self.steps[active] += 1
         self.similarity.copy_(self._similarity())
 
-        delta = self.similarity - prev_similarity
-        rewards[:, 0] = delta
+        canvas_mask = self.canvas > 0.5
+        newly_filled = canvas_mask & (~prev_canvas_mask)
+        new_target_fills = newly_filled & self.target_mask
+        filled_counts = new_target_fills.sum(dim=(1, 2, 3)).to(self.dtype)
+        rewards[:, 0] = filled_counts / torch.clamp(self.target_pixels, min=1.0)
         rewards[:, 0] -= float(self.config.step_penalty)
         rewards[:, 0] -= self.pen_down.to(self.dtype) * float(self.config.draw_penalty)
 
@@ -186,7 +198,6 @@ class ShapeDrawTorchEnv(SimTorchEnv):
             (self.num_envs, 1, self.height, self.width), dtype=self.dtype, device=self.device
         )
         for env_idx in range(self.num_envs):
-            shape_type = int(torch.randint(0, 3, (1,), device=self.device).item())
             cx = int(
                 torch.randint(self.width // 4, self.width * 3 // 4, (1,), device=self.device).item()
             )
@@ -200,16 +211,14 @@ class ShapeDrawTorchEnv(SimTorchEnv):
                     max(6, self.width // 8), max(7, self.width // 4), (1,), device=self.device
                 ).item()
             )
-
-            if shape_type == 0:
-                mask = self._circle_mask(cx, cy, size)
-            elif shape_type == 1:
-                mask = self._square_mask(cx, cy, size)
-            else:
-                mask = self._triangle_mask(cx, cy, size)
-
+            mask = self._circle_mask(cx, cy, size)
             targets[env_idx, 0][mask] = 1.0
         return targets
+
+    def _cache_target_masks(self) -> None:
+        self.target_mask.copy_(self.target > 0.5)
+        counts = self.target_mask.sum(dim=(1, 2, 3)).to(self.dtype)
+        self.target_pixels.copy_(torch.clamp(counts, min=1.0))
 
     def _circle_mask(self, cx: int, cy: int, radius: int) -> torch.Tensor:
         xx = self.x_coords.view(1, -1).expand(self.height, -1)
