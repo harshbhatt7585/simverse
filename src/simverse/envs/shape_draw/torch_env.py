@@ -239,22 +239,20 @@ class ShapeDrawTorchEnv(SimTorchEnv):
 
     def _draw_disks(self, draw_mask: torch.Tensor) -> None:
         active_envs = self.env_idx[draw_mask]
-        for env_idx in active_envs.tolist():
-            px = int(self.pen_x[env_idx].item())
-            py = int(self.pen_y[env_idx].item())
-            r = int(self.brush[env_idx].item())
-            x0 = max(0, px - r)
-            x1 = min(self.width - 1, px + r)
-            y0 = max(0, py - r)
-            y1 = min(self.height - 1, py + r)
-            if x0 > x1 or y0 > y1:
-                continue
-            xs = torch.arange(x0, x1 + 1, device=self.device)
-            ys = torch.arange(y0, y1 + 1, device=self.device)
-            grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
-            disk = (grid_x - px) * (grid_x - px) + (grid_y - py) * (grid_y - py) <= r * r
-            patch = self.canvas[env_idx, 0, y0 : y1 + 1, x0 : x1 + 1]
-            patch[disk] = 1.0
+        if active_envs.numel() == 0:
+            return
+
+        px = self.pen_x.index_select(0, active_envs).view(-1, 1, 1)
+        py = self.pen_y.index_select(0, active_envs).view(-1, 1, 1)
+        radius = self.brush.index_select(0, active_envs).view(-1, 1, 1)
+
+        xx = self.x_coords.view(1, 1, self.width)
+        yy = self.y_coords.view(1, self.height, 1)
+
+        dist_sq = (xx - px) * (xx - px) + (yy - py) * (yy - py)
+        draw_pixels = dist_sq <= radius * radius
+        env_idx, y_idx, x_idx = torch.nonzero(draw_pixels, as_tuple=True)
+        self.canvas[active_envs[env_idx], 0, y_idx, x_idx] = 1.0
 
     def _similarity(self) -> torch.Tensor:
         # IoU over binary masks; stronger foreground-focused signal than pixel accuracy.
