@@ -561,90 +561,113 @@ class PPOTrainer(Trainer):
         if self.use_ctde and self.centralized_critic is not None:
             self.centralized_critic.train()
 
+        buffer = self._tensor_buffers.get(agent.agent_id)
+        if buffer is None:
+            return
+        current_size = self._tensor_buffer_sizes.get(agent.agent_id, 0)
+        if current_size <= 0:
+            return
+
+        capacity = self._tensor_buffer_capacity
+        ptr = self._tensor_buffer_ptrs.get(agent.agent_id, 0)
+        start_idx = (ptr - current_size) % capacity
+        if start_idx + current_size <= capacity:
+            ordered_indices = torch.arange(start_idx, start_idx + current_size, device=self.device)
+        else:
+            first = torch.arange(start_idx, capacity, device=self.device)
+            second = torch.arange(0, (start_idx + current_size) % capacity, device=self.device)
+            ordered_indices = torch.cat((first, second), dim=0)
+
+        env_count = max(self.env_batch_size, 1)
+        usable_count = (int(ordered_indices.shape[0]) // env_count) * env_count
+        if usable_count <= 0:
+            return
+        if usable_count != int(ordered_indices.shape[0]):
+            ordered_indices = ordered_indices[-usable_count:]
+
+        actions_all = buffer["action"].index_select(0, ordered_indices)
+        old_log_probs_all = buffer["log_prob"].index_select(0, ordered_indices)
+        sampled_values_all = buffer["value"].index_select(0, ordered_indices)
+        rewards_all = buffer["reward"].index_select(0, ordered_indices)
+        dones_all = buffer["done"].index_select(0, ordered_indices)
+
+        advantages_all = self._compute_vectorized_gae(
+            rewards=rewards_all,
+            values=sampled_values_all,
+            dones=dones_all,
+            env_count=env_count,
+        )
+        returns_all = advantages_all + sampled_values_all
+        policy_advantages_all = advantages_all
+        if self.normalize_advantages and policy_advantages_all.numel() > 1:
+            policy_advantages_all = (policy_advantages_all - policy_advantages_all.mean()) / (
+                policy_advantages_all.std() + 1e-8
+            )
+
         for epoch in range(self.training_epochs):
-            batch = self._tensor_buffer_sample(agent.agent_id, self.batch_size)
-            if batch is None:
-                break
+            permutation = torch.randperm(usable_count, device=self.device)
+            epoch_policy_loss = 0.0
+            epoch_value_loss = 0.0
+            updates = 0
 
-            observations = batch["obs"]
-            actions = batch["action"]
-            old_log_probs = batch["log_prob"]
-            sampled_values = batch["value"]
-            rewards = batch["reward"]
-            dones = batch["done"]
-            sampled_global_obs = batch.get("global_obs")
-            if observations.shape[0] == 0:
-                break
+            for start in range(0, usable_count, self.batch_size):
+                mb_positions = permutation[start : start + self.batch_size]
+                if mb_positions.numel() == 0:
+                    continue
 
-            env_count = max(self.env_batch_size, 1)
-            sample_count = observations.shape[0]
-            usable_count = (sample_count // env_count) * env_count
-            if usable_count <= 0:
-                break
-            if usable_count != sample_count:
-                start = sample_count - usable_count
-                observations = observations[start:]
-                actions = actions[start:]
-                old_log_probs = old_log_probs[start:]
-                sampled_values = sampled_values[start:]
-                rewards = rewards[start:]
-                dones = dones[start:]
-                if sampled_global_obs is not None:
-                    sampled_global_obs = sampled_global_obs[start:]
+                mb_buffer_indices = ordered_indices.index_select(0, mb_positions)
+                observations = buffer["obs"].index_select(0, mb_buffer_indices)
+                actions = actions_all.index_select(0, mb_positions)
+                old_log_probs = old_log_probs_all.index_select(0, mb_positions)
+                policy_advantages = policy_advantages_all.index_select(0, mb_positions)
+                returns = returns_all.index_select(0, mb_positions)
 
-            advantages = self._compute_vectorized_gae(
-                rewards=rewards,
-                values=sampled_values,
-                dones=dones,
-                env_count=env_count,
-            )
-            returns = advantages + sampled_values
-            policy_advantages = advantages
-            if self.normalize_advantages and policy_advantages.numel() > 1:
-                policy_advantages = (policy_advantages - policy_advantages.mean()) / (
-                    policy_advantages.std() + 1e-8
+                logits, value = agent.policy(observations)
+                dist = torch.distributions.Categorical(logits=logits)
+                log_prob = dist.log_prob(actions)
+                ratio = torch.exp(log_prob - old_log_probs)
+                entropy = dist.entropy().mean()
+
+                surr1 = ratio * policy_advantages
+                surr2 = (
+                    torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                    * policy_advantages
                 )
+                policy_loss = -torch.min(surr1, surr2).mean()
+                if self.use_ctde:
+                    value_loss = torch.zeros((), dtype=self.dtype, device=self.device)
+                    loss = policy_loss - self.entropy_coef * entropy
+                else:
+                    value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
+                    loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
 
-            logits, value = agent.policy(observations)
-            dist = torch.distributions.Categorical(logits=logits)
-            log_prob = dist.log_prob(actions)
-            ratio = torch.exp(log_prob - old_log_probs)
-            entropy = dist.entropy().mean()
+                optimizer = self._get_optimizer(agent.agent_id)
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
 
-            surr1 = ratio * policy_advantages
-            surr2 = (
-                torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
-                * policy_advantages
-            )
-            policy_loss = -torch.min(surr1, surr2).mean()
-            if self.use_ctde:
-                value_loss = torch.zeros((), dtype=self.dtype, device=self.device)
-                loss = policy_loss - self.entropy_coef * entropy
-            else:
-                value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
-                loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
+                if self.use_ctde:
+                    sampled_global_obs = buffer["global_obs"].index_select(0, mb_buffer_indices)
+                    if self.centralized_critic_optimizer is None:
+                        raise RuntimeError("Missing centralized critic optimizer for CTDE")
+                    predicted_values = self._critic_value(sampled_global_obs).squeeze(-1)
+                    critic_loss = 0.5 * (returns.detach() - predicted_values).pow(2).mean()
+                    self.centralized_critic_optimizer.zero_grad(set_to_none=True)
+                    critic_loss.backward()
+                    self.centralized_critic_optimizer.step()
+                    value_loss = critic_loss.detach()
 
-            optimizer = self._get_optimizer(agent.agent_id)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+                epoch_policy_loss += float(policy_loss.item())
+                epoch_value_loss += float(value_loss.item())
+                updates += 1
 
-            if self.use_ctde:
-                if sampled_global_obs is None:
-                    raise ValueError("CTDE requires global_obs in sampled tensor batch")
-                if self.centralized_critic_optimizer is None:
-                    raise RuntimeError("Missing centralized critic optimizer for CTDE")
-                predicted_values = self._critic_value(sampled_global_obs).squeeze(-1)
-                critic_loss = 0.5 * (returns.detach() - predicted_values).pow(2).mean()
-                self.centralized_critic_optimizer.zero_grad(set_to_none=True)
-                critic_loss.backward()
-                self.centralized_critic_optimizer.step()
-                value_loss = critic_loss.detach()
+            if updates == 0:
+                continue
 
-            training_logger.log_epoch(
-                epoch, self.training_epochs, policy_loss.item(), value_loss.item()
-            )
-            self.stats.push_agent_losses(agent.agent_id, policy_loss.item(), value_loss.item())
+            avg_policy_loss = epoch_policy_loss / updates
+            avg_value_loss = epoch_value_loss / updates
+            training_logger.log_epoch(epoch, self.training_epochs, avg_policy_loss, avg_value_loss)
+            self.stats.push_agent_losses(agent.agent_id, avg_policy_loss, avg_value_loss)
             self.stats.log_wandb(step=self.stats.steps)
 
     def _init_logging(self, title: str = "Training"):
