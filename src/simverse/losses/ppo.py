@@ -1184,6 +1184,7 @@ class PPOTrainer(Trainer):
                 steps=episode_steps,
                 harvested_tiles=self._episode_harvested_tiles(),
             )
+            self.stats.log_wandb(step=self.stats.steps)
 
             pause_start = time.perf_counter()
             if self.episode_save_dir:
