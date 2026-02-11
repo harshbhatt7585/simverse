@@ -284,6 +284,47 @@ class PPOTrainer(Trainer):
             return [dict(info) for _ in range(batch_size)]
         return [{} for _ in range(batch_size)]
 
+    def _extract_info_for_env(self, info: Any, env_idx: int) -> Dict[str, Any]:
+        if isinstance(info, list):
+            if not info:
+                return {}
+            idx = min(max(env_idx, 0), len(info) - 1)
+            item = info[idx]
+            return item if isinstance(item, dict) else {}
+
+        if not isinstance(info, dict):
+            return {}
+
+        extracted: Dict[str, Any] = {}
+        for key, value in info.items():
+            if isinstance(value, torch.Tensor):
+                if value.ndim == 0:
+                    extracted[key] = value.item()
+                elif value.shape[0] > env_idx:
+                    item = value[env_idx]
+                    extracted[key] = item.item() if item.ndim == 0 else item.detach().cpu().tolist()
+                else:
+                    extracted[key] = value.detach().cpu().tolist()
+                continue
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0:
+                    extracted[key] = value.item()
+                elif value.shape[0] > env_idx:
+                    item = value[env_idx]
+                    extracted[key] = item.item() if np.ndim(item) == 0 else item.tolist()
+                else:
+                    extracted[key] = value.tolist()
+                continue
+            if isinstance(value, (list, tuple)):
+                if value:
+                    idx = min(max(env_idx, 0), len(value) - 1)
+                    extracted[key] = value[idx]
+                else:
+                    extracted[key] = value
+                continue
+            extracted[key] = value
+        return extracted
+
     def _extract_env_observation(self, observation: Dict[str, Any], env_idx: int) -> Dict[str, Any]:
         obs_array = self._obs_batch_array(observation)
         env_obs = obs_array[env_idx]
@@ -814,7 +855,7 @@ class PPOTrainer(Trainer):
 
                     if self.episode_save_dir and record_env_idx is not None:
                         env_to_record = min(record_env_idx, batch_envs - 1)
-                        info_list = self._ensure_info_list(info, batch_envs)
+                        info_env = self._extract_info_for_env(info, env_to_record)
                         frame_obs = self._extract_env_observation(obs, env_to_record)
                         frame_reward = self._reward_row_to_dict(
                             reward_tensor[env_to_record].detach().float().cpu().numpy()
@@ -827,7 +868,7 @@ class PPOTrainer(Trainer):
                             frame_obs,
                             frame_actions,
                             frame_reward,
-                            info_list[env_to_record],
+                            info_env,
                             step + 1,
                             bool(done_tensor[env_to_record].item()),
                         )

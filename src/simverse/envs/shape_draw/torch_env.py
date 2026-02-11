@@ -43,6 +43,7 @@ class ShapeDrawTorchEnv(SimTorchEnv):
 
         self.register_buffer("canvas", torch.zeros(self.num_envs, 1, self.height, self.width))
         self.register_buffer("target", torch.zeros(self.num_envs, 1, self.height, self.width))
+        self.register_buffer("obs_buffer", torch.zeros(self.num_envs, 3, self.height, self.width))
         self.register_buffer("pen_x", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("pen_y", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("pen_down", torch.zeros(self.num_envs, dtype=torch.bool))
@@ -79,15 +80,15 @@ class ShapeDrawTorchEnv(SimTorchEnv):
 
     def reset(self) -> Dict[str, torch.Tensor]:
         self.canvas.zero_()
-        self.target = self._sample_targets()
-        self.pen_x = torch.randint(0, self.width, (self.num_envs,), device=self.device)
-        self.pen_y = torch.randint(0, self.height, (self.num_envs,), device=self.device)
+        self.target.copy_(self._sample_targets())
+        self.pen_x.random_(0, self.width)
+        self.pen_y.random_(0, self.height)
         self.pen_down.zero_()
         self.brush.fill_(2)
         self.steps.zero_()
         self.done.zero_()
         self.winner.fill_(-1)
-        self.similarity = self._similarity()
+        self.similarity.copy_(self._similarity())
         return self._get_observation()
 
     def step(
@@ -138,7 +139,7 @@ class ShapeDrawTorchEnv(SimTorchEnv):
             self._draw_disks(draw_mask)
 
         self.steps[active] += 1
-        self.similarity = self._similarity()
+        self.similarity.copy_(self._similarity())
 
         delta = self.similarity - prev_similarity
         rewards[:, 0] = delta
@@ -155,10 +156,10 @@ class ShapeDrawTorchEnv(SimTorchEnv):
 
         obs = self._get_observation()
         info = {
-            "similarity": self.similarity.clone(),
-            "pen_down": self.pen_down.clone(),
-            "brush": self.brush.clone(),
-            "steps": self.steps.clone(),
+            "similarity": self.similarity,
+            "pen_down": self.pen_down,
+            "brush": self.brush,
+            "steps": self.steps,
         }
         return obs, rewards, self.done.clone(), info
 
@@ -263,11 +264,12 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         return intersection / torch.clamp(union, min=1.0)
 
     def _get_observation(self) -> Dict[str, torch.Tensor]:
-        pen_map = torch.zeros_like(self.canvas)
-        pen_map[self.env_idx, 0, self.pen_y, self.pen_x] = 1.0
-        obs = torch.cat((self.canvas, self.target, pen_map), dim=1).to(self.dtype)
+        self.obs_buffer[:, 0:1].copy_(self.canvas)
+        self.obs_buffer[:, 1:2].copy_(self.target)
+        self.obs_buffer[:, 2:3].zero_()
+        self.obs_buffer[self.env_idx, 2, self.pen_y, self.pen_x] = 1.0
         return {
-            "obs": obs,
+            "obs": self.obs_buffer,
             "done": self.done.clone(),
             "winner": self.winner.clone(),
             "steps": self.steps.clone(),

@@ -5,9 +5,11 @@ from typing import Any, Dict, Optional
 import torch
 
 
-def select_device() -> str:
+def select_device(*, require_cuda: bool = False) -> str:
     if torch.cuda.is_available():
         return "cuda"
+    if require_cuda:
+        raise RuntimeError("ShapeDraw GPU mode requires CUDA, but no CUDA device is available.")
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
@@ -64,9 +66,13 @@ def build_training_config(
     batch_size: Optional[int] = None,
     buffer_size: Optional[int] = None,
     device: Optional[str] = None,
-    dtype: torch.dtype = torch.bfloat16,
+    dtype: Optional[torch.dtype] = None,
+    require_cuda: bool = False,
 ) -> Dict[str, Any]:
-    resolved_device = device or select_device()
+    resolved_device = device or select_device(require_cuda=require_cuda)
+    resolved_dtype = dtype
+    if resolved_dtype is None:
+        resolved_dtype = torch.float16 if resolved_device == "cuda" else torch.float32
     resolved_num_envs = max(1, int(num_envs))
     resolved_num_agents = max(1, int(num_agents))
     resolved_batch_size = _derive_batch_size(
@@ -97,7 +103,7 @@ def build_training_config(
         "batch_size": resolved_batch_size,
         "buffer_size": resolved_buffer_size,
         "device": resolved_device,
-        "dtype": dtype,
+        "dtype": resolved_dtype,
         "torch_fastpath": True,
         "tensor_buffer_max_capacity": tensor_buffer_max_capacity,
     }
