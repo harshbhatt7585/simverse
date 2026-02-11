@@ -257,9 +257,12 @@ class ShapeDrawTorchEnv(SimTorchEnv):
             patch[disk] = 1.0
 
     def _similarity(self) -> torch.Tensor:
-        # 1 - mean absolute difference in [0, 1]
-        diff = torch.abs(self.target - self.canvas)
-        return 1.0 - diff.mean(dim=(1, 2, 3)).to(self.dtype)
+        # IoU over binary masks; stronger foreground-focused signal than pixel accuracy.
+        target_mask = self.target > 0.5
+        canvas_mask = self.canvas > 0.5
+        intersection = (target_mask & canvas_mask).sum(dim=(1, 2, 3)).to(self.dtype)
+        union = (target_mask | canvas_mask).sum(dim=(1, 2, 3)).to(self.dtype)
+        return intersection / torch.clamp(union, min=1.0)
 
     def _get_observation(self) -> Dict[str, torch.Tensor]:
         pen_map = torch.zeros_like(self.canvas)
