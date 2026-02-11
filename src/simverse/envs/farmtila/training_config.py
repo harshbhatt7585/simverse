@@ -13,6 +13,41 @@ def select_device() -> str:
     return "cpu"
 
 
+def _round_up_to_multiple(value: int, multiple: int) -> int:
+    if multiple <= 1:
+        return value
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+def _derive_batch_size(
+    *,
+    num_envs: int,
+    requested_batch_size: Optional[int],
+    device: str,
+) -> int:
+    batch_size = int(requested_batch_size) if requested_batch_size is not None else num_envs * 2
+    batch_size = _round_up_to_multiple(max(num_envs, batch_size), num_envs)
+    if device == "mps" and num_envs <= 2048:
+        batch_size = min(batch_size, 2048)
+        batch_size = _round_up_to_multiple(max(num_envs, batch_size), num_envs)
+    return batch_size
+
+
+def _derive_buffer_size(
+    *,
+    num_envs: int,
+    num_agents: int,
+    batch_size: int,
+    requested_buffer_size: Optional[int],
+) -> int:
+    min_buffer_size = batch_size * num_agents
+    default_buffer_size = min_buffer_size * 4
+    buffer_size = (
+        int(requested_buffer_size) if requested_buffer_size is not None else default_buffer_size
+    )
+    return _round_up_to_multiple(max(min_buffer_size, buffer_size), num_envs * num_agents)
+
+
 def build_training_config(
     *,
     width: int = 20,
@@ -34,25 +69,27 @@ def build_training_config(
 ) -> Dict[str, Any]:
     resolved_device = device or select_device()
 
-    resolved_num_envs = num_envs
+    resolved_num_envs = max(1, int(num_envs))
+    resolved_num_agents = max(1, int(num_agents))
     if resolved_device == "mps":
         resolved_num_envs = min(resolved_num_envs, 128)
 
-    resolved_buffer_size = (
-        buffer_size if buffer_size is not None else resolved_num_envs * num_agents * 10
+    resolved_batch_size = _derive_batch_size(
+        num_envs=resolved_num_envs,
+        requested_batch_size=batch_size,
+        device=resolved_device,
     )
-    resolved_batch_size = (
-        batch_size
-        if batch_size is not None
-        else min(8192, resolved_buffer_size // max(num_agents, 1))
+    resolved_buffer_size = _derive_buffer_size(
+        num_envs=resolved_num_envs,
+        num_agents=resolved_num_agents,
+        batch_size=resolved_batch_size,
+        requested_buffer_size=buffer_size,
     )
-    if resolved_device == "mps":
-        resolved_batch_size = min(resolved_batch_size, 2048)
 
     return {
         "width": width,
         "height": height,
-        "num_agents": num_agents,
+        "num_agents": resolved_num_agents,
         "num_envs": resolved_num_envs,
         "max_steps": max_steps,
         "episodes": episodes,
