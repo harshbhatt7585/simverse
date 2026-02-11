@@ -64,7 +64,7 @@ def build_training_config(
     batch_size: Optional[int] = None,
     buffer_size: Optional[int] = None,
     device: Optional[str] = None,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype = torch.bfloat16,
 ) -> Dict[str, Any]:
     resolved_device = device or select_device()
     resolved_num_envs = max(1, int(num_envs))

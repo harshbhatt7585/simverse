@@ -44,8 +44,8 @@ def train(use_wandb: bool = False, num_envs: int = 64) -> None:
     training_config = build_training_config(num_agents=1, num_envs=num_envs)
 
     config = ShapeDrawConfig(
-        width=64,
-        height=64,
+        width=20,
+        height=20,
         num_agents=training_config["num_agents"],
         num_envs=training_config["num_envs"],
         max_steps=training_config["max_steps"],

@@ -1036,7 +1036,7 @@ class PPOTrainer(Trainer):
             if episode_reward_tensor is not None:
                 episode_reward = float(episode_reward_tensor.item())
             if episode_agent_reward_tensor is not None:
-                episode_agent_reward = episode_agent_reward_tensor.detach().cpu().numpy()
+                episode_agent_reward = episode_agent_reward_tensor.detach().float().cpu().numpy()
 
             # Clear the step progress line before training logs
             print()
