@@ -598,9 +598,12 @@ class PPOTrainer(Trainer):
                 dones=dones,
                 env_count=env_count,
             )
-            if self.normalize_advantages and advantages.numel() > 1:
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             returns = advantages + sampled_values
+            policy_advantages = advantages
+            if self.normalize_advantages and policy_advantages.numel() > 1:
+                policy_advantages = (policy_advantages - policy_advantages.mean()) / (
+                    policy_advantages.std() + 1e-8
+                )
 
             logits, value = agent.policy(observations)
             dist = torch.distributions.Categorical(logits=logits)
@@ -608,8 +611,11 @@ class PPOTrainer(Trainer):
             ratio = torch.exp(log_prob - old_log_probs)
             entropy = dist.entropy().mean()
 
-            surr1 = ratio * advantages
-            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+            surr1 = ratio * policy_advantages
+            surr2 = (
+                torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                * policy_advantages
+            )
             policy_loss = -torch.min(surr1, surr2).mean()
             if self.use_ctde:
                 value_loss = torch.zeros((), dtype=self.dtype, device=self.device)
