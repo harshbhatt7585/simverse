@@ -76,3 +76,20 @@ You can also run directly with `uv`:
 - `uv sync --extra dev` (base + dev)
 - `uv sync --extra pettingzoo` (base + PettingZoo)
 - `uv sync --extra dev --extra pettingzoo` (all)
+
+## Shape Draw Env
+Train a visual agent that draws target shapes on a canvas:
+
+```bash
+python -m simverse.envs.shape_draw.train --num-envs 64 --wandb off
+```
+
+Render and control one environment on screen:
+- Arrow keys move the pen
+- `Space` toggles pen up/down
+- `Q`/`E` decrease/increase brush size
+- `R` resets
+
+```bash
+python -m simverse.envs.shape_draw.render --size 64 --scale 6 --fps 20
+```
