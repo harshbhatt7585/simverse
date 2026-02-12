@@ -70,7 +70,7 @@ def train(
     config = MazeRaceConfig(
         width=15,
         height=15,
-        num_agents=2,
+        num_agents=1,
         num_envs=max(1, int(num_envs)),
         max_steps=200,
         step_penalty=0.01,

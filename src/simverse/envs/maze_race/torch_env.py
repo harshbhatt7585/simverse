@@ -12,7 +12,7 @@ from simverse.envs.maze_race.config import MazeRaceConfig
 
 
 class MazeRaceTorchEnv(SimTorchEnv):
-    """Simple 2-agent maze racing env. First agent to its goal wins."""
+    """Simple maze racing env. First agent to its goal wins."""
 
     ACTION_STAY = 0
     ACTION_UP = 1
@@ -33,8 +33,8 @@ class MazeRaceTorchEnv(SimTorchEnv):
     ) -> None:
         super().__init__(device=device, dtype=dtype)
         self.config = config
-        if self.config.num_agents != 2:
-            raise ValueError("MazeRaceTorchEnv requires exactly 2 agents")
+        if self.config.num_agents not in (1, 2):
+            raise ValueError("MazeRaceTorchEnv supports 1 or 2 agents")
 
         self.num_envs = num_envs or getattr(config, "num_envs", 1)
         self.num_agents = self.config.num_agents
@@ -45,31 +45,44 @@ class MazeRaceTorchEnv(SimTorchEnv):
 
         self.agents: list[MazeRaceAgent] = []
 
-        self.start0 = (1, 1)
-        self.start1 = (self.width - 2, 1)
-        self.goal0 = (self.width - 2, self.height - 2)
-        self.goal1 = (1, self.height - 2)
+        self.start_positions = [(1, 1)]
+        if self.num_agents > 1:
+            self.start_positions.append((self.width - 2, 1))
+        self.goal_positions = [(self.width - 2, self.height - 2)]
+        if self.num_agents > 1:
+            self.goal_positions.append((1, self.height - 2))
+        self.start0 = self.start_positions[0]
+        self.start1 = self.start_positions[1] if self.num_agents > 1 else self.start_positions[0]
+        self.goal0 = self.goal_positions[0]
+        self.goal1 = self.goal_positions[1] if self.num_agents > 1 else self.goal_positions[0]
 
         self.register_buffer("walls", self._build_maze())
         self.register_buffer("wall_map", self.walls.to(self.dtype).unsqueeze(0))
 
-        goal0 = torch.zeros((self.height, self.width), dtype=self.dtype)
-        goal1 = torch.zeros((self.height, self.width), dtype=self.dtype)
+        goal_maps = torch.zeros((self.num_agents, self.height, self.width), dtype=self.dtype)
+        for idx, (gx, gy) in enumerate(self.goal_positions):
+            goal_maps[idx, gy, gx] = 1.0
 
-        goal0[self.goal0[1], self.goal0[0]] = 1.0
-        goal1[self.goal1[1], self.goal1[0]] = 1.0
+        self.register_buffer("goal_maps", goal_maps)
 
-        self.register_buffer("goal0_map", goal0.unsqueeze(0))
-        self.register_buffer("goal1_map", goal1.unsqueeze(0))
-
-        self.register_buffer("agent_pos", torch.zeros(self.num_envs, 2, 2, dtype=torch.int64))
+        self.register_buffer(
+            "agent_pos", torch.zeros(self.num_envs, self.num_agents, 2, dtype=torch.int64)
+        )
         self.register_buffer("steps", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("done", torch.zeros(self.num_envs, dtype=torch.bool))
         self.register_buffer(
             "winner", torch.full((self.num_envs,), self.WINNER_NONE, dtype=torch.int64)
         )
+        self.obs_channels = 1 + 2 * self.num_agents
         self.register_buffer(
-            "obs_buffer", torch.zeros(self.num_envs, 5, self.height, self.width, dtype=self.dtype)
+            "obs_buffer",
+            torch.zeros(
+                self.num_envs,
+                self.obs_channels,
+                self.height,
+                self.width,
+                dtype=self.dtype,
+            ),
         )
         self.register_buffer("env_idx", torch.arange(self.num_envs, dtype=torch.int64))
 
@@ -87,20 +100,19 @@ class MazeRaceTorchEnv(SimTorchEnv):
         return gym.spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(5, self.height, self.width),
+            shape=(self.obs_channels, self.height, self.width),
             dtype=np.float32,
         )
 
     def assign_agents(self, agents: list[MazeRaceAgent]) -> None:
-        if len(agents) != 2:
-            raise ValueError("MazeRace requires exactly 2 agents")
+        if len(agents) != self.num_agents:
+            raise ValueError(f"MazeRace requires exactly {self.num_agents} agents")
         self.agents = agents
 
     def reset(self) -> Dict[str, torch.Tensor]:
-        self.agent_pos[:, 0, 0] = self.start0[0]
-        self.agent_pos[:, 0, 1] = self.start0[1]
-        self.agent_pos[:, 1, 0] = self.start1[0]
-        self.agent_pos[:, 1, 1] = self.start1[1]
+        for idx, (sx, sy) in enumerate(self.start_positions):
+            self.agent_pos[:, idx, 0] = sx
+            self.agent_pos[:, idx, 1] = sy
         self.steps.zero_()
         self.done.zero_()
         self.winner.fill_(self.WINNER_NONE)
@@ -135,31 +147,37 @@ class MazeRaceTorchEnv(SimTorchEnv):
         rewards[active, :] -= float(self.config.step_penalty)
         self.steps[active] += 1
 
-        p0x = self.agent_pos[:, 0, 0]
-        p0y = self.agent_pos[:, 0, 1]
-        p1x = self.agent_pos[:, 1, 0]
-        p1y = self.agent_pos[:, 1, 1]
+        reached: list[torch.Tensor] = []
+        for idx, (gx, gy) in enumerate(self.goal_positions):
+            px = self.agent_pos[:, idx, 0]
+            py = self.agent_pos[:, idx, 1]
+            reached.append(active & (px == gx) & (py == gy))
 
-        reached0 = active & (p0x == self.goal0[0]) & (p0y == self.goal0[1])
-        reached1 = active & (p1x == self.goal1[0]) & (p1y == self.goal1[1])
+        if self.num_agents == 1:
+            reached0 = reached[0]
+            if torch.any(reached0):
+                rewards[reached0, 0] += float(self.config.win_reward)
+                self.winner[reached0] = 0
+            finished = reached0
+        else:
+            reached0, reached1 = reached
+            both = reached0 & reached1
+            only0 = reached0 & (~reached1)
+            only1 = reached1 & (~reached0)
 
-        both = reached0 & reached1
-        only0 = reached0 & (~reached1)
-        only1 = reached1 & (~reached0)
+            if torch.any(only0):
+                rewards[only0, 0] += float(self.config.win_reward)
+                rewards[only0, 1] -= float(self.config.lose_penalty)
+                self.winner[only0] = 0
+            if torch.any(only1):
+                rewards[only1, 1] += float(self.config.win_reward)
+                rewards[only1, 0] -= float(self.config.lose_penalty)
+                self.winner[only1] = 1
+            if torch.any(both):
+                rewards[both, :] += float(self.config.draw_reward)
+                self.winner[both] = self.WINNER_DRAW
 
-        if torch.any(only0):
-            rewards[only0, 0] += float(self.config.win_reward)
-            rewards[only0, 1] -= float(self.config.lose_penalty)
-            self.winner[only0] = 0
-        if torch.any(only1):
-            rewards[only1, 1] += float(self.config.win_reward)
-            rewards[only1, 0] -= float(self.config.lose_penalty)
-            self.winner[only1] = 1
-        if torch.any(both):
-            rewards[both, :] += float(self.config.draw_reward)
-            self.winner[both] = self.WINNER_DRAW
-
-        finished = only0 | only1 | both
+            finished = only0 | only1 | both
 
         timed_out = active & (self.steps >= int(self.config.max_steps))
         draw_timeout = timed_out & (~finished)
@@ -221,11 +239,15 @@ class MazeRaceTorchEnv(SimTorchEnv):
         self.obs_buffer.zero_()
 
         self.obs_buffer[:, 0].copy_(self.wall_map.expand(self.num_envs, -1, -1))
-        self.obs_buffer[:, 1].copy_(self.goal0_map.expand(self.num_envs, -1, -1))
-        self.obs_buffer[:, 2].copy_(self.goal1_map.expand(self.num_envs, -1, -1))
-
-        self.obs_buffer[self.env_idx, 3, self.agent_pos[:, 0, 1], self.agent_pos[:, 0, 0]] = 1.0
-        self.obs_buffer[self.env_idx, 4, self.agent_pos[:, 1, 1], self.agent_pos[:, 1, 0]] = 1.0
+        for idx in range(self.num_agents):
+            goal_map = self.goal_maps[idx].unsqueeze(0).expand(self.num_envs, -1, -1)
+            self.obs_buffer[:, 1 + idx].copy_(goal_map)
+            self.obs_buffer[
+                self.env_idx,
+                1 + self.num_agents + idx,
+                self.agent_pos[:, idx, 1],
+                self.agent_pos[:, idx, 0],
+            ] = 1.0
 
         return {
             "obs": self.obs_buffer,

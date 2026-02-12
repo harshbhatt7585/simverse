@@ -53,7 +53,7 @@ class MazeRaceRenderer:
         clock = pygame.time.Clock()
 
         env.reset()
-        pending_actions = torch.zeros((1, 2), dtype=torch.int64, device=env.device)
+        pending_actions = torch.zeros((1, env.num_agents), dtype=torch.int64, device=env.device)
 
         running = True
         while running:
@@ -91,16 +91,17 @@ class MazeRaceRenderer:
                 else:
                     pending_actions[0, 0] = env.ACTION_STAY
 
-                if keys[pygame.K_w]:
-                    pending_actions[0, 1] = env.ACTION_UP
-                elif keys[pygame.K_s]:
-                    pending_actions[0, 1] = env.ACTION_DOWN
-                elif keys[pygame.K_a]:
-                    pending_actions[0, 1] = env.ACTION_LEFT
-                elif keys[pygame.K_d]:
-                    pending_actions[0, 1] = env.ACTION_RIGHT
-                else:
-                    pending_actions[0, 1] = env.ACTION_STAY
+                if env.num_agents > 1:
+                    if keys[pygame.K_w]:
+                        pending_actions[0, 1] = env.ACTION_UP
+                    elif keys[pygame.K_s]:
+                        pending_actions[0, 1] = env.ACTION_DOWN
+                    elif keys[pygame.K_a]:
+                        pending_actions[0, 1] = env.ACTION_LEFT
+                    elif keys[pygame.K_d]:
+                        pending_actions[0, 1] = env.ACTION_RIGHT
+                    else:
+                        pending_actions[0, 1] = env.ACTION_STAY
 
             _obs, _reward, done, info = env.step(pending_actions)
             if bool(done[0].item()):
@@ -111,10 +112,14 @@ class MazeRaceRenderer:
             screen.fill(self.colors["bg"])
 
             walls = env.walls.detach().cpu().numpy()
-            p0x = int(env.agent_pos[0, 0, 0].item())
-            p0y = int(env.agent_pos[0, 0, 1].item())
-            p1x = int(env.agent_pos[0, 1, 0].item())
-            p1y = int(env.agent_pos[0, 1, 1].item())
+            agent_positions = []
+            for idx in range(env.num_agents):
+                agent_positions.append(
+                    (
+                        int(env.agent_pos[0, idx, 0].item()),
+                        int(env.agent_pos[0, idx, 1].item()),
+                    )
+                )
 
             for y in range(env.height):
                 for x in range(env.width):
@@ -127,40 +132,35 @@ class MazeRaceRenderer:
                     color = self.colors["wall"] if walls[y, x] else self.colors["floor"]
                     pygame.draw.rect(screen, color, rect)
 
-            g0 = pygame.Rect(
-                env.goal0[0] * self.cell_size,
-                env.goal0[1] * self.cell_size,
-                self.cell_size,
-                self.cell_size,
-            )
-            g1 = pygame.Rect(
-                env.goal1[0] * self.cell_size,
-                env.goal1[1] * self.cell_size,
-                self.cell_size,
-                self.cell_size,
-            )
-            pygame.draw.rect(screen, self.colors["goal0"], g0)
-            pygame.draw.rect(screen, self.colors["goal1"], g1)
+            goal_positions = getattr(env, "goal_positions", None)
+            if not goal_positions:
+                goal_positions = [env.goal0]
+                if env.num_agents > 1:
+                    goal_positions.append(env.goal1)
+            goal_colors = [self.colors["goal0"], self.colors["goal1"]]
+            for idx, (gx, gy) in enumerate(goal_positions):
+                color = goal_colors[min(idx, len(goal_colors) - 1)]
+                rect = pygame.Rect(
+                    gx * self.cell_size,
+                    gy * self.cell_size,
+                    self.cell_size,
+                    self.cell_size,
+                )
+                pygame.draw.rect(screen, color, rect)
 
             r = max(5, self.cell_size // 3)
-            pygame.draw.circle(
-                screen,
-                self.colors["agent0"],
-                (
-                    p0x * self.cell_size + self.cell_size // 2,
-                    p0y * self.cell_size + self.cell_size // 2,
-                ),
-                r,
-            )
-            pygame.draw.circle(
-                screen,
-                self.colors["agent1"],
-                (
-                    p1x * self.cell_size + self.cell_size // 2,
-                    p1y * self.cell_size + self.cell_size // 2,
-                ),
-                r,
-            )
+            agent_colors = [self.colors["agent0"], self.colors["agent1"]]
+            for idx, (px, py) in enumerate(agent_positions):
+                color = agent_colors[min(idx, len(agent_colors) - 1)]
+                pygame.draw.circle(
+                    screen,
+                    color,
+                    (
+                        px * self.cell_size + self.cell_size // 2,
+                        py * self.cell_size + self.cell_size // 2,
+                    ),
+                    r,
+                )
 
             winner = int(info["winner"][0].item())
             steps = int(info["steps"][0].item())
@@ -173,10 +173,11 @@ class MazeRaceRenderer:
             else:
                 status = "running"
             auto_status = "auto:on" if self.auto_mode else "auto:off"
-            hud = (
-                f"steps={steps} | {status} | {auto_status} | "
-                "arrows=blue, WASD=orange, T=toggle auto, R=reset"
-            )
+            if env.num_agents > 1:
+                controls = "arrows=blue, WASD=orange"
+            else:
+                controls = "arrows=agent"
+            hud = f"steps={steps} | {status} | {auto_status} | {controls} | T=toggle auto, R=reset"
             text = font.render(hud, True, self.colors["text"])
             screen.blit(text, (8, env.height * self.cell_size + 12))
 
@@ -242,11 +243,15 @@ class MazeRaceReplayRenderer:
     ) -> None:
         if self.screen is None or self.font is None or self.clock is None:
             return
+        channel_count = obs.shape[0]
+        if channel_count < 3:
+            return
+        num_agents = (channel_count - 1) // 2
+        if 1 + 2 * num_agents != channel_count:
+            return
         walls = obs[0]
-        goal0 = obs[1]
-        goal1 = obs[2]
-        agent0 = obs[3]
-        agent1 = obs[4]
+        goal_maps = obs[1 : 1 + num_agents]
+        agent_maps = obs[1 + num_agents : 1 + 2 * num_agents]
 
         height, width = walls.shape
         self._ensure_display(width, height)
@@ -258,9 +263,9 @@ class MazeRaceReplayRenderer:
             for x in range(width):
                 if walls[y, x] > 0.5:
                     color = self.colors["wall"]
-                elif goal0[y, x] > 0.5:
+                elif num_agents >= 1 and goal_maps[0][y, x] > 0.5:
                     color = self.colors["goal0"]
-                elif goal1[y, x] > 0.5:
+                elif num_agents >= 2 and goal_maps[1][y, x] > 0.5:
                     color = self.colors["goal1"]
                 else:
                     color = self.colors["floor"]
@@ -279,28 +284,20 @@ class MazeRaceReplayRenderer:
             y, x = coords[0]
             return (int(x), int(y))
 
-        p0x, p0y = _agent_pos(agent0)
-        p1x, p1y = _agent_pos(agent1)
-
         r = max(5, self.cell_size // 3)
-        pygame.draw.circle(
-            self.screen,
-            self.colors["agent0"],
-            (
-                p0x * self.cell_size + self.cell_size // 2,
-                p0y * self.cell_size + self.cell_size // 2,
-            ),
-            r,
-        )
-        pygame.draw.circle(
-            self.screen,
-            self.colors["agent1"],
-            (
-                p1x * self.cell_size + self.cell_size // 2,
-                p1y * self.cell_size + self.cell_size // 2,
-            ),
-            r,
-        )
+        agent_colors = [self.colors["agent0"], self.colors["agent1"]]
+        for idx in range(num_agents):
+            px, py = _agent_pos(agent_maps[idx])
+            color = agent_colors[min(idx, len(agent_colors) - 1)]
+            pygame.draw.circle(
+                self.screen,
+                color,
+                (
+                    px * self.cell_size + self.cell_size // 2,
+                    py * self.cell_size + self.cell_size // 2,
+                ),
+                r,
+            )
 
         winner = info.get("winner")
         if winner == 0:
@@ -331,7 +328,7 @@ class MazeRaceReplayRenderer:
                 return
             frame = frames[idx]
             obs = np.asarray(frame.get("observation"))
-            if obs.ndim != 3 or obs.shape[0] < 5:
+            if obs.ndim != 3 or obs.shape[0] < 3:
                 idx += 1
                 if idx >= len(frames):
                     if loop:
