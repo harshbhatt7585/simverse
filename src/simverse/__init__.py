@@ -12,6 +12,8 @@ _OPTIONAL_EXPORTS: Dict[str, str] = {
     "ShapeDrawVectorizedEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawTorchEnv": "simverse.envs.shape_draw.torch_env",
     "MazeRaceTorchEnv": "simverse.envs.maze_race.torch_env",
+    "GymTorchConfig": "simverse.envs.gym_env.torch_env",
+    "GymTorchEnv": "simverse.envs.gym_env.torch_env",
     "RandomPolicy": "simverse.policies.random_policy",
     "quicktrain": "simverse.recipes.quickstart",
 }

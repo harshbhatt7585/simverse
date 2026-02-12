@@ -93,3 +93,16 @@ Render and control one environment on screen:
 ```bash
 python -m simverse.envs.shape_draw.render --size 64 --scale 6 --fps 20
 ```
+
+## Gym Env (Torch Fastpath)
+Train a Gymnasium discrete-action env (default `CartPole-v1`) through the torch fastpath:
+
+```bash
+python -m simverse.envs.gym_env.train --env-id CartPole-v1 --num-envs 512 --episodes 120
+```
+
+Render random or checkpointed rollouts, with optional MP4 recording:
+
+```bash
+python -m simverse.envs.gym_env.render --env-id CartPole-v1 --episodes 3 --record on
+```
