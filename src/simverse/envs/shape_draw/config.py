@@ -13,7 +13,7 @@ class ShapeDrawConfig:
     min_brush: int = 1
     max_brush: int = 5
     draw_penalty: float = 0.001
-    step_penalty: float = 0.0005
+    step_penalty: float = 0.0
     completion_bonus: float = 2.0
     completion_threshold: float = 0.95
     policies: List[Any] = field(default_factory=list)
