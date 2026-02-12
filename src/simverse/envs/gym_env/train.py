@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -283,6 +284,12 @@ def train(
         "torch_fastpath": True,
     }
 
+    resolved_project_name = "simverse-gym"
+    resolved_run_name = (
+        f"{env_id.replace('/', '_').lower()}-"
+        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
+
     loss_trainer = PPOTrainer(
         optimizers=optimizers,
         episodes=training_config["episodes"],
@@ -292,8 +299,8 @@ def train(
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
         config=training_config,
-        project_name="simverse-gym",
-        run_name=f"ppo-{env_id}",
+        project_name=resolved_project_name,
+        run_name=resolved_run_name,
         episode_save_dir="recordings/gym_env",
         device=training_config["device"],
         batch_size=training_config["batch_size"],

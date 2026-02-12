@@ -101,6 +101,12 @@ Train a Gymnasium discrete-action env (default `CartPole-v1`) through the torch 
 python -m simverse.envs.gym_env.train --env-id CartPole-v1 --num-envs 512 --episodes 120
 ```
 
+Enable W&B logging:
+
+```bash
+python -m simverse.envs.gym_env.train --env-id CartPole-v1 --wandb on
+```
+
 Render random or checkpointed rollouts, with optional MP4 recording:
 
 ```bash
