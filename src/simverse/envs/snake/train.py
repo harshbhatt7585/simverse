@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=300, help="Max steps per episode")
     parser.add_argument("--init-length", type=int, default=3, help="Initial snake length")
     parser.add_argument("--food-reward", type=float, default=1.0)
-    parser.add_argument("--crash-penalty", type=float, default=1.0)
+    parser.add_argument("--crash-penalty", type=float, default=2.0)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--wandb", choices=["on", "off"], default="off")

@@ -89,6 +89,14 @@ class SnakeTorchEnv(SimTorchEnv):
                 dtype=self.dtype,
             ),
         )
+        self.register_buffer(
+            "grid_buffer",
+            torch.zeros((self.num_envs, self.height, self.width), dtype=torch.int64),
+        )
+        self.register_buffer(
+            "snake_coords_buffer",
+            torch.full((self.num_envs, self.max_cells, 2), -1, dtype=torch.int64),
+        )
 
         wall_map = torch.zeros((1, self.height, self.width), dtype=self.dtype)
         wall_map[:, 0, :] = 1.0
@@ -111,6 +119,7 @@ class SnakeTorchEnv(SimTorchEnv):
         )
         self.register_buffer("opposite_direction", torch.tensor([1, 0, 3, 2], dtype=torch.int64))
         self.register_buffer("env_idx", torch.arange(self.num_envs, dtype=torch.int64))
+        self.register_buffer("cell_idx", torch.arange(self.max_cells, dtype=torch.int64))
         self.register_buffer(
             "init_segment_offsets",
             torch.arange(self.init_length, dtype=torch.int64),
@@ -132,7 +141,43 @@ class SnakeTorchEnv(SimTorchEnv):
                     shape=(self.obs_channels, self.height, self.width),
                     dtype=np.float32,
                 ),
+                "grid": gym.spaces.Box(
+                    low=0,
+                    high=4,
+                    shape=(self.num_envs, self.height, self.width),
+                    dtype=np.int64,
+                ),
+                "head_pos": gym.spaces.Box(
+                    low=0,
+                    high=max(self.width, self.height),
+                    shape=(self.num_envs, 2),
+                    dtype=np.int64,
+                ),
+                "food_pos": gym.spaces.Box(
+                    low=0,
+                    high=max(self.width, self.height),
+                    shape=(self.num_envs, 2),
+                    dtype=np.int64,
+                ),
+                "snake_coords": gym.spaces.Box(
+                    low=-1,
+                    high=max(self.width, self.height),
+                    shape=(self.num_envs, self.max_cells, 2),
+                    dtype=np.int64,
+                ),
+                "snake_length": gym.spaces.Box(
+                    low=0,
+                    high=self.max_cells,
+                    shape=(self.num_envs,),
+                    dtype=np.int64,
+                ),
                 "done": gym.spaces.MultiBinary(self.num_envs),
+                "winner": gym.spaces.Box(
+                    low=-1,
+                    high=-1,
+                    shape=(self.num_envs,),
+                    dtype=np.int64,
+                ),
                 "steps": gym.spaces.Box(
                     low=0,
                     high=max(int(self.config.max_steps), 1),
@@ -510,9 +555,13 @@ class SnakeTorchEnv(SimTorchEnv):
 
     def _get_observation(self) -> Dict[str, torch.Tensor]:
         self.obs_buffer.zero_()
+        self.grid_buffer.zero_()
+        self.snake_coords_buffer.fill_(-1)
         self.obs_buffer[:, 0].copy_(self.wall_map.expand(self.num_envs, -1, -1))
+        self.grid_buffer[self.wall_map.expand(self.num_envs, -1, -1) > 0.5] = 1
 
         self.obs_buffer[self.env_idx, 1, self.food_pos[:, 1], self.food_pos[:, 0]] = 1.0
+        self.grid_buffer[self.env_idx, self.food_pos[:, 1], self.food_pos[:, 0]] = 2
 
         head_x = self.snake_segments[:, 0, 0]
         head_y = self.snake_segments[:, 0, 1]
@@ -521,11 +570,28 @@ class SnakeTorchEnv(SimTorchEnv):
         self.obs_buffer[:, 3].copy_(self.occupied_grid)
         self.obs_buffer[self.env_idx, 3, head_y, head_x] = 0.0
         self.obs_buffer[self.env_idx, 4 + self.direction, :, :] = 1.0
+        self.grid_buffer[self.occupied_grid] = 3
+        self.grid_buffer[self.env_idx, head_y, head_x] = 4
+
+        valid_mask = self.cell_idx.unsqueeze(0) < self.snake_length.unsqueeze(1)
+        if bool(valid_mask.any().item()):
+            env_ids = self.env_idx.unsqueeze(1).expand(-1, self.max_cells)
+            seg_x = self.snake_segments[:, :, 0]
+            seg_y = self.snake_segments[:, :, 1]
+            coord_idx_x = self.cell_idx.expand_as(seg_x)[valid_mask]
+            coord_idx_y = self.cell_idx.expand_as(seg_y)[valid_mask]
+            self.snake_coords_buffer[env_ids[valid_mask], coord_idx_x, 0] = seg_x[valid_mask]
+            self.snake_coords_buffer[env_ids[valid_mask], coord_idx_y, 1] = seg_y[valid_mask]
 
         return {
             # Return a snapshot so caller-side tensors do not alias this mutable buffer
             # across step() calls.
             "obs": self.obs_buffer.clone(),
+            "grid": self.grid_buffer.clone(),
+            "head_pos": torch.stack((head_x, head_y), dim=1).clone(),
+            "food_pos": self.food_pos.clone(),
+            "snake_coords": self.snake_coords_buffer.clone(),
+            "snake_length": self.snake_length.clone(),
             "done": self.done.clone(),
             "winner": self.winner.clone(),
             "steps": self.steps.clone(),
