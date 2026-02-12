@@ -9,6 +9,10 @@ import torch
 
 from simverse.abstractor.simtorch_env import SimTorchEnv
 
+# Gymnasium releases that still use np.float_ break on NumPy 2.x; restore alias for compatibility.
+if not hasattr(np, "float_"):
+    np.float_ = np.float64  # type: ignore[attr-defined]
+
 
 @dataclass
 class GymTorchConfig:
