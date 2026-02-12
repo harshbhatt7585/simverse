@@ -167,12 +167,6 @@ class SnakeTorchEnv(SimTorchEnv):
         self,
         actions: torch.Tensor | Sequence[int] | np.ndarray | Dict[int, int] | None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        if self.num_envs > 1:
-            done_indices = torch.nonzero(self.done, as_tuple=True)[0]
-            if done_indices.numel() > 0:
-                # Recycle finished vectorized slots without CPU sync/tolist loops.
-                self._reset_indices(done_indices)
-
         action_tensor = self._normalize_actions(actions)
 
         rewards = torch.zeros(
