@@ -16,9 +16,17 @@ from simverse.envs.maze_race.torch_env import MazeRaceTorchEnv
 
 
 class MazeRaceRenderer:
-    def __init__(self, cell_size: int = 32, fps: int = 20) -> None:
+    def __init__(
+        self,
+        cell_size: int = 32,
+        fps: int = 20,
+        auto_mode: bool = True,
+        auto_reset: bool = True,
+    ) -> None:
         self.cell_size = cell_size
         self.fps = fps
+        self.auto_mode = auto_mode
+        self.auto_reset = auto_reset
 
         self.colors = {
             "bg": (18, 20, 24),
@@ -50,36 +58,51 @@ class MazeRaceRenderer:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                    env.reset()
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r:
+                        env.reset()
+                    elif event.key == pygame.K_t:
+                        self.auto_mode = not self.auto_mode
 
-            keys = pygame.key.get_pressed()
-            if keys[pygame.K_UP]:
-                pending_actions[0, 0] = env.ACTION_UP
-            elif keys[pygame.K_DOWN]:
-                pending_actions[0, 0] = env.ACTION_DOWN
-            elif keys[pygame.K_LEFT]:
-                pending_actions[0, 0] = env.ACTION_LEFT
-            elif keys[pygame.K_RIGHT]:
-                pending_actions[0, 0] = env.ACTION_RIGHT
+            if self.auto_mode:
+                pending_actions.copy_(
+                    torch.randint(
+                        0,
+                        5,
+                        pending_actions.shape,
+                        dtype=torch.int64,
+                        device=env.device,
+                    )
+                )
             else:
-                pending_actions[0, 0] = env.ACTION_STAY
+                keys = pygame.key.get_pressed()
+                if keys[pygame.K_UP]:
+                    pending_actions[0, 0] = env.ACTION_UP
+                elif keys[pygame.K_DOWN]:
+                    pending_actions[0, 0] = env.ACTION_DOWN
+                elif keys[pygame.K_LEFT]:
+                    pending_actions[0, 0] = env.ACTION_LEFT
+                elif keys[pygame.K_RIGHT]:
+                    pending_actions[0, 0] = env.ACTION_RIGHT
+                else:
+                    pending_actions[0, 0] = env.ACTION_STAY
 
-            if keys[pygame.K_w]:
-                pending_actions[0, 1] = env.ACTION_UP
-            elif keys[pygame.K_s]:
-                pending_actions[0, 1] = env.ACTION_DOWN
-            elif keys[pygame.K_a]:
-                pending_actions[0, 1] = env.ACTION_LEFT
-            elif keys[pygame.K_d]:
-                pending_actions[0, 1] = env.ACTION_RIGHT
-            else:
-                pending_actions[0, 1] = env.ACTION_STAY
+                if keys[pygame.K_w]:
+                    pending_actions[0, 1] = env.ACTION_UP
+                elif keys[pygame.K_s]:
+                    pending_actions[0, 1] = env.ACTION_DOWN
+                elif keys[pygame.K_a]:
+                    pending_actions[0, 1] = env.ACTION_LEFT
+                elif keys[pygame.K_d]:
+                    pending_actions[0, 1] = env.ACTION_RIGHT
+                else:
+                    pending_actions[0, 1] = env.ACTION_STAY
 
             _obs, _reward, done, info = env.step(pending_actions)
             if bool(done[0].item()):
+                if self.auto_mode and self.auto_reset:
+                    env.reset()
                 # Hold final frame until user resets.
-                pass
 
             screen.fill(self.colors["bg"])
 
@@ -119,13 +142,19 @@ class MazeRaceRenderer:
             pygame.draw.circle(
                 screen,
                 self.colors["agent0"],
-                (p0x * self.cell_size + self.cell_size // 2, p0y * self.cell_size + self.cell_size // 2),
+                (
+                    p0x * self.cell_size + self.cell_size // 2,
+                    p0y * self.cell_size + self.cell_size // 2,
+                ),
                 r,
             )
             pygame.draw.circle(
                 screen,
                 self.colors["agent1"],
-                (p1x * self.cell_size + self.cell_size // 2, p1y * self.cell_size + self.cell_size // 2),
+                (
+                    p1x * self.cell_size + self.cell_size // 2,
+                    p1y * self.cell_size + self.cell_size // 2,
+                ),
                 r,
             )
 
@@ -139,7 +168,11 @@ class MazeRaceRenderer:
                 status = "draw"
             else:
                 status = "running"
-            hud = f"steps={steps} | {status} | arrows=blue, WASD=orange, R=reset"
+            auto_status = "auto:on" if self.auto_mode else "auto:off"
+            hud = (
+                f"steps={steps} | {status} | {auto_status} | "
+                "arrows=blue, WASD=orange, T=toggle auto, R=reset"
+            )
             text = font.render(hud, True, self.colors["text"])
             screen.blit(text, (8, env.height * self.cell_size + 12))
 
@@ -154,6 +187,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--size", type=int, default=15, help="Maze width/height (square)")
     parser.add_argument("--cell", type=int, default=36, help="Cell size in pixels")
     parser.add_argument("--fps", type=int, default=20, help="Render FPS")
+    parser.add_argument(
+        "--manual",
+        dest="auto",
+        action="store_false",
+        help="Disable auto-run and use keyboard controls",
+    )
+    parser.add_argument(
+        "--no-auto-reset",
+        dest="auto_reset",
+        action="store_false",
+        help="Stop after an episode ends",
+    )
+    parser.set_defaults(auto=True, auto_reset=True)
     return parser.parse_args()
 
 
@@ -161,4 +207,9 @@ if __name__ == "__main__":
     args = parse_args()
     cfg = MazeRaceConfig(width=args.size, height=args.size, num_envs=1, max_steps=300)
     env = MazeRaceTorchEnv(config=cfg, num_envs=1)
-    MazeRaceRenderer(cell_size=args.cell, fps=args.fps).run(env)
+    MazeRaceRenderer(
+        cell_size=args.cell,
+        fps=args.fps,
+        auto_mode=args.auto,
+        auto_reset=args.auto_reset,
+    ).run(env)
