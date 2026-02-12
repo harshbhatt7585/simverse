@@ -112,3 +112,17 @@ Render random or checkpointed rollouts, with optional MP4 recording:
 ```bash
 python -m simverse.envs.gym_env.render --env-id CartPole-v1 --episodes 3 --record on
 ```
+
+## Snake Env
+Train the built-in Snake torch environment:
+
+```bash
+python -m simverse.envs.snake.train --num-envs 512 --episodes 200 --wandb off
+```
+
+Render Snake with manual controls (arrow keys) or policy checkpoint:
+
+```bash
+python -m simverse.envs.snake.render --mode manual --episodes 3
+python -m simverse.envs.snake.render --mode policy --checkpoint /path/to/snake_checkpoint.pth
+```

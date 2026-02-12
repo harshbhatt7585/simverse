@@ -10,9 +10,14 @@ _KNOWN_ENVS = {
     "ShapeDrawEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawVectorizedEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawTorchEnv": "simverse.envs.shape_draw.torch_env",
+    "BattleGridConfig": "simverse.envs.battle_grid.torch_env",
+    "BattleGridTorchEnv": "simverse.envs.battle_grid.torch_env",
     "MazeRaceTorchEnv": "simverse.envs.maze_race.torch_env",
     "GymTorchConfig": "simverse.envs.gym_env.torch_env",
     "GymTorchEnv": "simverse.envs.gym_env.torch_env",
+    "SnakeAgent": "simverse.envs.snake",
+    "SnakeConfig": "simverse.envs.snake",
+    "SnakeTorchEnv": "simverse.envs.snake",
 }
 
 for name, module_path in _KNOWN_ENVS.items():
