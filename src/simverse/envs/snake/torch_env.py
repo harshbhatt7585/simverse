@@ -20,10 +20,6 @@ class SnakeTorchEnv(SimTorchEnv):
     ACTION_RIGHT = 3
     ACTION_SPACE = gym.spaces.Discrete(4)
 
-    WINNER_NONE = -1
-    WINNER_LOSE = -2
-    WINNER_WIN = 0
-
     def __init__(
         self,
         config: SnakeConfig,
@@ -75,7 +71,11 @@ class SnakeTorchEnv(SimTorchEnv):
         self.register_buffer("done", torch.zeros(self.num_envs, dtype=torch.bool))
         self.register_buffer(
             "winner",
-            torch.full((self.num_envs,), self.WINNER_NONE, dtype=torch.int64),
+            torch.full((self.num_envs,), -1, dtype=torch.int64),
+        )
+        self.register_buffer(
+            "termination_reason",
+            torch.zeros((self.num_envs,), dtype=torch.int64),
         )
 
         self.obs_channels = 8
@@ -165,6 +165,7 @@ class SnakeTorchEnv(SimTorchEnv):
                 "winner": self.winner.clone(),
                 "steps": self.steps.clone(),
                 "score": self.score.clone(),
+                "termination_reason": self.termination_reason.clone(),
             }
             return obs, rewards, self.done.clone(), info
 
@@ -193,10 +194,7 @@ class SnakeTorchEnv(SimTorchEnv):
         ate_food = active & (new_x == self.food_pos[:, 0]) & (new_y == self.food_pos[:, 1])
 
         wall_collision = active & (
-            (new_x <= 0)
-            | (new_x >= (self.width - 1))
-            | (new_y <= 0)
-            | (new_y >= (self.height - 1))
+            (new_x <= 0) | (new_x >= (self.width - 1)) | (new_y <= 0) | (new_y >= (self.height - 1))
         )
 
         clamped_x = torch.clamp(new_x, 0, self.width - 1)
@@ -206,6 +204,8 @@ class SnakeTorchEnv(SimTorchEnv):
         self_collision = active & occupied_at_new & (~moving_into_tail)
 
         crashed = active & (self_collision | wall_collision)
+        wall_crash = crashed & wall_collision
+        self_crash = crashed & self_collision & (~wall_collision)
         moved = active & (~crashed)
         self.steps[active_indices] += 1
 
@@ -243,12 +243,13 @@ class SnakeTorchEnv(SimTorchEnv):
         crashed_indices = torch.nonzero(crashed, as_tuple=True)[0]
         if crashed_indices.numel() > 0:
             rewards[crashed_indices, 0] -= float(self.config.crash_penalty)
-            self.winner[crashed_indices] = self.WINNER_LOSE
+            self.termination_reason[wall_crash] = 1
+            self.termination_reason[self_crash] = 2
 
         timed_out = active & (self.steps >= int(self.config.max_steps))
-        timed_out_winners = torch.nonzero(timed_out & (~crashed), as_tuple=True)[0]
-        if timed_out_winners.numel() > 0:
-            self.winner[timed_out_winners] = self.WINNER_WIN
+        timed_out_only = timed_out & (~crashed)
+        if bool(timed_out_only.any().item()):
+            self.termination_reason[timed_out_only] = 3
 
         self.done |= crashed | timed_out
 
@@ -257,6 +258,7 @@ class SnakeTorchEnv(SimTorchEnv):
             "winner": self.winner.clone(),
             "steps": self.steps.clone(),
             "score": self.score.clone(),
+            "termination_reason": self.termination_reason.clone(),
         }
         return obs, rewards, self.done.clone(), info
 
@@ -315,7 +317,8 @@ class SnakeTorchEnv(SimTorchEnv):
         count = int(env_indices.numel())
 
         self.done[env_indices] = False
-        self.winner[env_indices] = self.WINNER_NONE
+        self.winner[env_indices] = -1
+        self.termination_reason[env_indices] = 0
         self.steps[env_indices] = 0
         self.score[env_indices] = 0
         self.snake_length[env_indices] = self.init_length
@@ -434,7 +437,7 @@ class SnakeTorchEnv(SimTorchEnv):
             self.food_pos[full_envs, 0] = 1
             self.food_pos[full_envs, 1] = 1
             self.done[full_envs] = True
-            self.winner[full_envs] = self.WINNER_WIN
+            self.termination_reason[full_envs] = 4
 
         pending = env_indices[~full_mask]
         if pending.numel() == 0:
@@ -486,7 +489,7 @@ class SnakeTorchEnv(SimTorchEnv):
         self.food_pos[env_index, 0] = 1
         self.food_pos[env_index, 1] = 1
         self.done[env_index] = True
-        self.winner[env_index] = self.WINNER_WIN
+        self.termination_reason[env_index] = 4
 
     def _get_observation(self) -> Dict[str, torch.Tensor]:
         self.obs_buffer.zero_()
@@ -510,4 +513,5 @@ class SnakeTorchEnv(SimTorchEnv):
             "winner": self.winner.clone(),
             "steps": self.steps.clone(),
             "score": self.score.clone(),
+            "termination_reason": self.termination_reason.clone(),
         }
