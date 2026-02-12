@@ -10,6 +10,7 @@ _KNOWN_ENVS = {
     "ShapeDrawEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawVectorizedEnv": "simverse.envs.shape_draw.env",
     "ShapeDrawTorchEnv": "simverse.envs.shape_draw.torch_env",
+    "MazeRaceTorchEnv": "simverse.envs.maze_race.torch_env",
 }
 
 for name, module_path in _KNOWN_ENVS.items():
