@@ -70,10 +70,6 @@ class SnakeTorchEnv(SimTorchEnv):
         self.register_buffer("score", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("done", torch.zeros(self.num_envs, dtype=torch.bool))
         self.register_buffer(
-            "winner",
-            torch.full((self.num_envs,), -1, dtype=torch.int64),
-        )
-        self.register_buffer(
             "termination_reason",
             torch.zeros((self.num_envs,), dtype=torch.int64),
         )
@@ -172,12 +168,6 @@ class SnakeTorchEnv(SimTorchEnv):
                     dtype=np.int64,
                 ),
                 "done": gym.spaces.MultiBinary(self.num_envs),
-                "winner": gym.spaces.Box(
-                    low=-1,
-                    high=-1,
-                    shape=(self.num_envs,),
-                    dtype=np.int64,
-                ),
                 "steps": gym.spaces.Box(
                     low=0,
                     high=max(int(self.config.max_steps), 1),
@@ -224,7 +214,6 @@ class SnakeTorchEnv(SimTorchEnv):
         if active_indices.numel() == 0:
             obs = self._get_observation()
             info = {
-                "winner": self.winner.clone(),
                 "steps": self.steps.clone(),
                 "score": self.score.clone(),
                 "termination_reason": self.termination_reason.clone(),
@@ -273,6 +262,10 @@ class SnakeTorchEnv(SimTorchEnv):
 
         moved_indices = torch.nonzero(moved, as_tuple=True)[0]
         if moved_indices.numel() > 0:
+            bonus_indices = moved_indices[(self.steps[moved_indices] % 10) == 0]
+            if bonus_indices.numel() > 0:
+                rewards[bonus_indices, 0] += 1.0
+
             moved_lengths = self.snake_length[moved_indices]
             shift_cells = int(moved_lengths.max().item())
             self.snake_segments[
@@ -317,7 +310,6 @@ class SnakeTorchEnv(SimTorchEnv):
 
         obs = self._get_observation()
         info = {
-            "winner": self.winner.clone(),
             "steps": self.steps.clone(),
             "score": self.score.clone(),
             "termination_reason": self.termination_reason.clone(),
@@ -379,7 +371,6 @@ class SnakeTorchEnv(SimTorchEnv):
         count = int(env_indices.numel())
 
         self.done[env_indices] = False
-        self.winner[env_indices] = -1
         self.termination_reason[env_indices] = 0
         self.steps[env_indices] = 0
         self.score[env_indices] = 0
@@ -593,7 +584,6 @@ class SnakeTorchEnv(SimTorchEnv):
             "snake_coords": self.snake_coords_buffer.clone(),
             "snake_length": self.snake_length.clone(),
             "done": self.done.clone(),
-            "winner": self.winner.clone(),
             "steps": self.steps.clone(),
             "score": self.score.clone(),
             "termination_reason": self.termination_reason.clone(),

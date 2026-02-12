@@ -216,12 +216,13 @@ def _render_replay(
             info = frame.get("info", {}) if isinstance(frame.get("info", {}), dict) else {}
             step = _extract_scalar_int(frame.get("step"), default=0)
             score = _extract_scalar_int(info.get("score"), default=0)
-            winner = _extract_scalar_int(info.get("winner"), default=-1)
+            term_reason = _extract_scalar_int(info.get("termination_reason"), default=0)
             done = bool(frame.get("done", False))
             status = "done" if done else "running"
 
             hud_text = (
-                f"replay={path.name} step={step} score={score} " f"winner={winner} state={status}"
+                f"replay={path.name} step={step} score={score} "
+                f"term={term_reason} state={status}"
             )
             _draw_obs_frame(
                 screen=screen,
@@ -402,7 +403,8 @@ def render(
                 completed_episodes += 1
                 print(
                     f"episode={completed_episodes} steps={int(env.steps[0].item())} "
-                    f"score={int(env.score[0].item())} winner={int(env.winner[0].item())}"
+                    f"score={int(env.score[0].item())} "
+                    f"term={int(env.termination_reason[0].item())}"
                 )
 
         if reset_requested and completed_episodes < episodes:
