@@ -95,7 +95,9 @@ class GymTorchEnv(SimTorchEnv):
         self._obs_shape = tuple(int(v) for v in transformed_sample.shape[1:])
 
         low = self._transform_single_observation(np.asarray(single_obs_space.low, dtype=np.float32))
-        high = self._transform_single_observation(np.asarray(single_obs_space.high, dtype=np.float32))
+        high = self._transform_single_observation(
+            np.asarray(single_obs_space.high, dtype=np.float32)
+        )
         self._observation_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
         self.register_buffer("done", torch.zeros(self.num_envs, dtype=torch.bool))
@@ -191,7 +193,9 @@ class GymTorchEnv(SimTorchEnv):
             self._episode_lengths[done_indices] = 0
 
         obs_tensor = self._obs_batch_to_tensor(obs_batch)
-        reward_tensor = torch.as_tensor(reward_np, dtype=self.dtype, device=self.device).unsqueeze(1)
+        reward_tensor = torch.as_tensor(reward_np, dtype=self.dtype, device=self.device).unsqueeze(
+            1
+        )
         done_tensor = torch.as_tensor(done_np, dtype=torch.bool, device=self.device)
 
         self.done.copy_(done_tensor)
@@ -262,9 +266,7 @@ class GymTorchEnv(SimTorchEnv):
             action_tensor = action_tensor.repeat(self.num_envs)
 
         if action_tensor.shape[0] != self.num_envs:
-            raise ValueError(
-                f"Expected {self.num_envs} actions, got {int(action_tensor.shape[0])}"
-            )
+            raise ValueError(f"Expected {self.num_envs} actions, got {int(action_tensor.shape[0])}")
 
         action_tensor = action_tensor.to(dtype=torch.int64, device="cpu")
         action_tensor = torch.clamp(action_tensor, 0, self._single_action_space.n - 1)

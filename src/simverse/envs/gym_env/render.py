@@ -84,8 +84,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--env-id", type=str, default="CartPole-v1", help="Gymnasium env id")
     parser.add_argument("--episodes", type=int, default=3, help="Episodes to run")
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
-    parser.add_argument("--fps", type=int, default=30, help="Frame rate target when using human render")
-    parser.add_argument("--checkpoint", type=str, default=None, help="Checkpoint path to load policy")
+    parser.add_argument(
+        "--fps", type=int, default=30, help="Frame rate target when using human render"
+    )
+    parser.add_argument(
+        "--checkpoint", type=str, default=None, help="Checkpoint path to load policy"
+    )
     parser.add_argument("--record", choices=["on", "off"], default="off")
     parser.add_argument("--record-dir", type=str, default="recordings/gym_env/videos")
     parser.add_argument("--seed", type=int, default=None)

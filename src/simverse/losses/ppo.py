@@ -1,7 +1,7 @@
 import contextlib
 import random
 import time
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -43,6 +43,7 @@ class PPOTrainer(Trainer):
         project_name: str = "simverse",
         run_name: str = "ppo-training",
         episode_save_dir: str | None = None,
+        frame_sink: Callable[[Dict[str, Any]], None] | None = None,
         device: Union[torch.device, str] = "cpu",
         batch_size: int = DEFAULT_BATCH_SIZE,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
@@ -75,6 +76,7 @@ class PPOTrainer(Trainer):
         self._wandb_initialized = False
         self.use_wandb = use_wandb
         self.episode_save_dir = episode_save_dir
+        self.frame_sink = frame_sink
         self._env_metadata_cache: Dict[str, Any] | None = None
         self.device = torch.device(device)
         self.batch_size = batch_size
@@ -110,6 +112,17 @@ class PPOTrainer(Trainer):
         self._tensor_buffer_ptrs: Dict[int, int] = {}
         self._tensor_buffer_capacity = 0
         self._tensor_obs_shape: tuple[int, ...] | None = None
+
+    def _handle_frame_record(self, frame_record: Dict[str, Any]) -> None:
+        if self.episode_save_dir:
+            self.stats.record_frame(frame_record)
+        if self.frame_sink is None:
+            return
+        try:
+            self.frame_sink(frame_record)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Frame sink failed; disabling live render. Error: %s", exc)
+            self.frame_sink = None
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -624,8 +637,12 @@ class PPOTrainer(Trainer):
             ordered_indices = ordered_indices[-usable_count:]
 
         actions_all = buffer["action"].index_select(0, ordered_indices)
-        old_log_probs_all = buffer["log_prob"].index_select(0, ordered_indices).to(dtype=torch.float32)
-        sampled_values_all = buffer["value"].index_select(0, ordered_indices).to(dtype=torch.float32)
+        old_log_probs_all = (
+            buffer["log_prob"].index_select(0, ordered_indices).to(dtype=torch.float32)
+        )
+        sampled_values_all = (
+            buffer["value"].index_select(0, ordered_indices).to(dtype=torch.float32)
+        )
         rewards_all = buffer["reward"].index_select(0, ordered_indices).to(dtype=torch.float32)
         dones_all = buffer["done"].index_select(0, ordered_indices)
 
@@ -854,7 +871,7 @@ class PPOTrainer(Trainer):
             self.env_batch_size = self._batch_size_from_obs(obs)
             self.stats.set_env_count(self.env_batch_size)
             record_env_idx: Optional[int]
-            if self.episode_save_dir:
+            if self.episode_save_dir or self.frame_sink:
                 record_env_idx = random.randrange(max(self.env_batch_size, 1))
             else:
                 record_env_idx = None
@@ -910,7 +927,9 @@ class PPOTrainer(Trainer):
                                 logits, value = agent.policy(actor_obs)
                             logits_f32 = logits.to(dtype=torch.float32)
                             if not bool(torch.isfinite(logits_f32).all().item()):
-                                raise RuntimeError("Non-finite logits detected during action sampling")
+                                raise RuntimeError(
+                                    "Non-finite logits detected during action sampling"
+                                )
                             dist = torch.distributions.Categorical(logits=logits_f32)
                             action = dist.sample()
                             log_prob = dist.log_prob(action).to(dtype=torch.float32)
@@ -930,7 +949,7 @@ class PPOTrainer(Trainer):
                     reward_tensor = self._reward_to_tensor(reward, batch_envs)
                     done_tensor = self._done_to_tensor(done, batch_envs)
 
-                    if self.episode_save_dir and record_env_idx is not None:
+                    if (self.episode_save_dir or self.frame_sink) and record_env_idx is not None:
                         env_to_record = min(record_env_idx, batch_envs - 1)
                         info_env = self._extract_info_for_env(info, env_to_record)
                         frame_obs = self._extract_env_observation(obs, env_to_record)
@@ -949,7 +968,7 @@ class PPOTrainer(Trainer):
                             step + 1,
                             bool(done_tensor[env_to_record].item()),
                         )
-                        self.stats.record_frame(frame_record)
+                        self._handle_frame_record(frame_record)
 
                     obs_batch = obs_tensor.detach()
                     done_batch = done_tensor.detach()
@@ -1080,7 +1099,7 @@ class PPOTrainer(Trainer):
                     done_array_cpu = done_array
                 info_list = self._ensure_info_list(info, batch_envs)
 
-                if self.episode_save_dir and record_env_idx is not None:
+                if (self.episode_save_dir or self.frame_sink) and record_env_idx is not None:
                     env_to_record = min(record_env_idx, batch_envs - 1)
                     frame_obs = self._extract_env_observation(obs, env_to_record)
                     frame_reward = self._reward_row_to_dict(reward_array_cpu[env_to_record])
@@ -1099,7 +1118,7 @@ class PPOTrainer(Trainer):
                         step + 1,
                         bool(done_array_cpu[env_to_record]),
                     )
-                    self.stats.record_frame(frame_record)
+                    self._handle_frame_record(frame_record)
 
                 for env_idx in range(batch_envs):
                     env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
@@ -1229,9 +1248,12 @@ class PPOTrainer(Trainer):
                             )
                             policy_loss = -torch.min(surr1, surr2).mean()
 
-                            value_loss = 0.5 * (
-                                returns[i] - value.squeeze().to(dtype=torch.float32)
-                            ).pow(2).mean()
+                            value_loss = (
+                                0.5
+                                * (returns[i] - value.squeeze().to(dtype=torch.float32))
+                                .pow(2)
+                                .mean()
+                            )
 
                             loss = policy_loss + 0.5 * value_loss
 

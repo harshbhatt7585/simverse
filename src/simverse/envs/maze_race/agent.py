@@ -21,7 +21,9 @@ class MazeRaceAgent(SimAgent):
         name: str | None = None,
     ) -> None:
         action_space = action_space if action_space is not None else DEFAULT_AGENT_ACTIONS
-        super().__init__(name=name or f"maze_racer_{agent_id}", action_space=action_space, policy=policy)
+        super().__init__(
+            name=name or f"maze_racer_{agent_id}", action_space=action_space, policy=policy
+        )
         self.agent_id = agent_id
         self.position = (0, 0)
         self.reward = 0.0

@@ -61,7 +61,9 @@ class GymAgent(SimAgent):
         name: str | None = None,
     ) -> None:
         action_space = np.arange(action_count, dtype=np.int64)
-        super().__init__(name=name or f"gym_agent_{agent_id}", action_space=action_space, policy=policy)
+        super().__init__(
+            name=name or f"gym_agent_{agent_id}", action_space=action_space, policy=policy
+        )
         self.agent_id = agent_id
         self.reward = 0.0
         self.memory: dict = {}
@@ -137,7 +139,9 @@ def _record_policy_video(
         if isinstance(frame, np.ndarray):
             frames.append(frame)
         while not (terminated or truncated) and steps < max_steps:
-            obs_batch = observation_batch_to_chw(np.expand_dims(np.asarray(obs, dtype=np.float32), axis=0))
+            obs_batch = observation_batch_to_chw(
+                np.expand_dims(np.asarray(obs, dtype=np.float32), axis=0)
+            )
             obs_tensor = torch.as_tensor(obs_batch, dtype=torch.float32, device=device)
             with torch.no_grad():
                 logits, _ = policy(obs_tensor)
@@ -286,8 +290,7 @@ def train(
 
     resolved_project_name = "simverse-gym"
     resolved_run_name = (
-        f"{env_id.replace('/', '_').lower()}-"
-        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        f"{env_id.replace('/', '_').lower()}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
     loss_trainer = PPOTrainer(

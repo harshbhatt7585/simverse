@@ -65,8 +65,12 @@ class MazeRaceTorchEnv(SimTorchEnv):
         self.register_buffer("agent_pos", torch.zeros(self.num_envs, 2, 2, dtype=torch.int64))
         self.register_buffer("steps", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("done", torch.zeros(self.num_envs, dtype=torch.bool))
-        self.register_buffer("winner", torch.full((self.num_envs,), self.WINNER_NONE, dtype=torch.int64))
-        self.register_buffer("obs_buffer", torch.zeros(self.num_envs, 5, self.height, self.width, dtype=self.dtype))
+        self.register_buffer(
+            "winner", torch.full((self.num_envs,), self.WINNER_NONE, dtype=torch.int64)
+        )
+        self.register_buffer(
+            "obs_buffer", torch.zeros(self.num_envs, 5, self.height, self.width, dtype=self.dtype)
+        )
         self.register_buffer("env_idx", torch.arange(self.num_envs, dtype=torch.int64))
 
         self.register_buffer("delta_x", torch.tensor([0, 0, 0, -1, 1], dtype=torch.int64))
@@ -106,7 +110,9 @@ class MazeRaceTorchEnv(SimTorchEnv):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         action_tensor = self._normalize_actions(actions)
-        rewards = torch.zeros((self.num_envs, self.num_agents), dtype=self.dtype, device=self.device)
+        rewards = torch.zeros(
+            (self.num_envs, self.num_agents), dtype=self.dtype, device=self.device
+        )
         active = ~self.done
 
         for agent_id in range(self.num_agents):

@@ -17,7 +17,9 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
+from simverse.envs.maze_race.live_server import LiveRenderServer
 from simverse.envs.maze_race.torch_env import MazeRaceTorchEnv
+from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -39,6 +41,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=150, help="Training episodes")
     parser.add_argument("--wandb", choices=["on", "off"], default="off")
     parser.add_argument("--compile", choices=["on", "off"], default="on")
+    parser.add_argument("--render-server", choices=["on", "off"], default="on")
+    parser.add_argument("--render-host", type=str, default="127.0.0.1")
+    parser.add_argument("--render-port", type=int, default=8765)
+    parser.add_argument("--render-stride", type=int, default=1, help="Stream every Nth frame")
     return parser.parse_args()
 
 
@@ -47,9 +53,13 @@ def train(
     episodes: int = 150,
     use_wandb: bool = False,
     use_compile: bool = True,
+    render_server: bool = True,
+    render_host: str = "127.0.0.1",
+    render_port: int = 8765,
+    render_stride: int = 1,
 ) -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    device = "cuda" if torch.cuda.is_available() else "mps"
+    dtype = torch.float16 if device == "cuda" else torch.bfloat16
 
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -116,6 +126,29 @@ def train(
         "torch_fastpath": True,
     }
 
+    live_server = None
+    frame_sink = None
+    if render_server:
+        live_server = LiveRenderServer(
+            output_path="recordings/maze_race/live.jsonl",
+            host=render_host,
+            port=render_port,
+            title="Maze Race Live",
+            frame_stride=render_stride,
+        )
+        live_server.start()
+        live_server.push_meta(
+            {
+                "title": "Maze Race Live",
+                "env": "maze_race",
+                "width": config.width,
+                "height": config.height,
+                "channels": 5,
+            }
+        )
+        training_logger.info(f"Live render server running at {live_server.url()}")
+        frame_sink = live_server.push_frame
+
     loss_trainer = PPOTrainer(
         optimizers=optimizers,
         episodes=training_config["episodes"],
@@ -128,6 +161,7 @@ def train(
         project_name="simverse-maze-race",
         run_name="ppo-maze-race",
         episode_save_dir="recordings/maze_race",
+        frame_sink=frame_sink,
         device=training_config["device"],
         batch_size=training_config["batch_size"],
         buffer_size=training_config["buffer_size"],
@@ -142,7 +176,11 @@ def train(
         loss_trainer=loss_trainer,
         agent_factory=agent_factory,
     )
-    simulator.train(title="Maze Race Training")
+    try:
+        simulator.train(title="Maze Race Training")
+    finally:
+        if live_server is not None:
+            live_server.stop()
 
 
 if __name__ == "__main__":
@@ -152,4 +190,8 @@ if __name__ == "__main__":
         episodes=cli_args.episodes,
         use_wandb=cli_args.wandb == "on",
         use_compile=cli_args.compile == "on",
+        render_server=cli_args.render_server == "on",
+        render_host=cli_args.render_host,
+        render_port=cli_args.render_port,
+        render_stride=cli_args.render_stride,
     )
