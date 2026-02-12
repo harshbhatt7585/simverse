@@ -63,6 +63,9 @@ def build_training_config(
     gae_lambda: float = 0.95,
     entropy_coef: float = 0.01,
     normalize_advantages: bool = True,
+    max_grad_norm: float = 0.5,
+    use_amp: Optional[bool] = None,
+    amp_dtype: str = "float16",
     batch_size: Optional[int] = None,
     buffer_size: Optional[int] = None,
     device: Optional[str] = None,
@@ -75,6 +78,7 @@ def build_training_config(
         resolved_dtype = torch.float16 if resolved_device == "cuda" else torch.float32
     resolved_num_envs = max(1, int(num_envs))
     resolved_num_agents = max(1, int(num_agents))
+    resolved_use_amp = bool(use_amp) if use_amp is not None else resolved_device == "cuda"
     resolved_batch_size = _derive_batch_size(
         num_envs=resolved_num_envs,
         requested_batch_size=batch_size,
@@ -100,6 +104,9 @@ def build_training_config(
         "gae_lambda": gae_lambda,
         "entropy_coef": entropy_coef,
         "normalize_advantages": normalize_advantages,
+        "max_grad_norm": max_grad_norm,
+        "use_amp": resolved_use_amp,
+        "amp_dtype": amp_dtype,
         "batch_size": resolved_batch_size,
         "buffer_size": resolved_buffer_size,
         "device": resolved_device,

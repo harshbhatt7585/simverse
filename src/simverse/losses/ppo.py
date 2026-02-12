@@ -1,3 +1,4 @@
+import contextlib
 import random
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -78,9 +79,21 @@ class PPOTrainer(Trainer):
         self.device = torch.device(device)
         self.batch_size = batch_size
         self.dtype = dtype
+        # Keep trainable params in FP32 for optimizer stability; rollout tensors can use self.dtype.
+        self.policy_dtype = torch.float32
         self.env_batch_size = 1
         self.entropy_coef = float(self.config.get("entropy_coef", 0.01))
         self.normalize_advantages = bool(self.config.get("normalize_advantages", True))
+        self.max_grad_norm = float(self.config.get("max_grad_norm", 0.5))
+        amp_config = self.config.get("use_amp")
+        self.use_amp = bool(amp_config) if amp_config is not None else self.device.type == "cuda"
+        amp_dtype_name = str(self.config.get("amp_dtype", "float16")).lower()
+        self.amp_dtype = torch.bfloat16 if amp_dtype_name == "bfloat16" else torch.float16
+        self._amp_enabled = self.use_amp and self.device.type == "cuda"
+        self.grad_scaler = torch.amp.GradScaler(
+            device="cuda",
+            enabled=self._amp_enabled and self.amp_dtype == torch.float16,
+        )
         self.use_ctde = bool(self.config.get("ctde", False))
         if self.use_ctde and self.centralized_critic is None:
             raise ValueError("CTDE requires a centralized_critic model")
@@ -111,9 +124,34 @@ class PPOTrainer(Trainer):
         for agent in getattr(self, "agents", []):
             policy = getattr(agent, "policy", None)
             if policy is not None:
-                policy.to(device=self.device, dtype=self.dtype)
+                policy.to(device=self.device, dtype=self.policy_dtype)
         if self.centralized_critic is not None:
-            self.centralized_critic.to(device=self.device, dtype=self.dtype)
+            self.centralized_critic.to(device=self.device, dtype=self.policy_dtype)
+
+    def _autocast_context(self):
+        if self._amp_enabled:
+            return torch.autocast(device_type="cuda", dtype=self.amp_dtype)
+        return contextlib.nullcontext()
+
+    def _optimizer_step(
+        self,
+        optimizer: torch.optim.Optimizer,
+        loss: torch.Tensor,
+        model: torch.nn.Module,
+    ) -> None:
+        optimizer.zero_grad(set_to_none=True)
+        if self.grad_scaler.is_enabled():
+            self.grad_scaler.scale(loss).backward()
+            self.grad_scaler.unscale_(optimizer)
+            if self.max_grad_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), self.max_grad_norm)
+            self.grad_scaler.step(optimizer)
+            self.grad_scaler.update()
+            return
+        loss.backward()
+        if self.max_grad_norm > 0.0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), self.max_grad_norm)
+        optimizer.step()
 
     def _env_metadata(self) -> Dict[str, Any]:
         if self._env_metadata_cache is not None:
@@ -231,7 +269,7 @@ class PPOTrainer(Trainer):
             value = value[-1]
         if value.dim() == 1:
             value = value.unsqueeze(-1)
-        return value.to(dtype=self.dtype, device=self.device)
+        return value.to(dtype=torch.float32, device=self.device)
 
     def _batch_size_from_obs(self, observation: Dict[str, Any]) -> int:
         return int(self._obs_batch_array(observation).shape[0])
@@ -416,8 +454,8 @@ class PPOTrainer(Trainer):
     def _reward_to_tensor(self, reward: Any, batch_size: int) -> torch.Tensor:
         reward_array = self._reward_to_array(reward, batch_size)
         if isinstance(reward_array, torch.Tensor):
-            return reward_array.to(device=self.device, dtype=self.dtype)
-        return torch.as_tensor(reward_array, device=self.device, dtype=self.dtype)
+            return reward_array.to(device=self.device, dtype=torch.float32)
+        return torch.as_tensor(reward_array, device=self.device, dtype=torch.float32)
 
     def _done_to_tensor(self, done: Any, batch_size: int) -> torch.Tensor:
         done_array = self._done_to_array(done, batch_size)
@@ -457,9 +495,9 @@ class PPOTrainer(Trainer):
                     device=self.device,
                 ),
                 "action": torch.empty((capacity,), dtype=torch.int64, device=self.device),
-                "log_prob": torch.empty((capacity,), dtype=self.dtype, device=self.device),
-                "value": torch.empty((capacity,), dtype=self.dtype, device=self.device),
-                "reward": torch.empty((capacity,), dtype=self.dtype, device=self.device),
+                "log_prob": torch.empty((capacity,), dtype=torch.float32, device=self.device),
+                "value": torch.empty((capacity,), dtype=torch.float32, device=self.device),
+                "reward": torch.empty((capacity,), dtype=torch.float32, device=self.device),
                 "done": torch.empty((capacity,), dtype=torch.bool, device=self.device),
             }
             if self.use_ctde:
@@ -509,9 +547,9 @@ class PPOTrainer(Trainer):
         indices = (torch.arange(batch_size, device=self.device) + ptr) % capacity
         buffer["obs"].index_copy_(0, indices, obs[:batch_size])
         buffer["action"].index_copy_(0, indices, action[:batch_size])
-        buffer["log_prob"].index_copy_(0, indices, log_prob[:batch_size])
-        buffer["value"].index_copy_(0, indices, value[:batch_size])
-        buffer["reward"].index_copy_(0, indices, reward[:batch_size])
+        buffer["log_prob"].index_copy_(0, indices, log_prob[:batch_size].to(dtype=torch.float32))
+        buffer["value"].index_copy_(0, indices, value[:batch_size].to(dtype=torch.float32))
+        buffer["reward"].index_copy_(0, indices, reward[:batch_size].to(dtype=torch.float32))
         buffer["done"].index_copy_(0, indices, done[:batch_size])
         if self.use_ctde:
             if global_obs is None:
@@ -586,9 +624,9 @@ class PPOTrainer(Trainer):
             ordered_indices = ordered_indices[-usable_count:]
 
         actions_all = buffer["action"].index_select(0, ordered_indices)
-        old_log_probs_all = buffer["log_prob"].index_select(0, ordered_indices)
-        sampled_values_all = buffer["value"].index_select(0, ordered_indices)
-        rewards_all = buffer["reward"].index_select(0, ordered_indices)
+        old_log_probs_all = buffer["log_prob"].index_select(0, ordered_indices).to(dtype=torch.float32)
+        sampled_values_all = buffer["value"].index_select(0, ordered_indices).to(dtype=torch.float32)
+        rewards_all = buffer["reward"].index_select(0, ordered_indices).to(dtype=torch.float32)
         dones_all = buffer["done"].index_select(0, ordered_indices)
 
         advantages_all = self._compute_vectorized_gae(
@@ -622,10 +660,15 @@ class PPOTrainer(Trainer):
                 policy_advantages = policy_advantages_all.index_select(0, mb_positions)
                 returns = returns_all.index_select(0, mb_positions)
 
-                logits, value = agent.policy(observations)
-                dist = torch.distributions.Categorical(logits=logits)
+                with self._autocast_context():
+                    logits, value = agent.policy(observations)
+                logits_f32 = logits.to(dtype=torch.float32)
+                value_f32 = value.squeeze(-1).to(dtype=torch.float32)
+                if not bool(torch.isfinite(logits_f32).all().item()):
+                    raise RuntimeError("Non-finite logits detected during PPO update")
+                dist = torch.distributions.Categorical(logits=logits_f32)
                 log_prob = dist.log_prob(actions)
-                ratio = torch.exp(log_prob - old_log_probs)
+                ratio = torch.exp(log_prob.to(dtype=torch.float32) - old_log_probs)
                 entropy = dist.entropy().mean()
 
                 surr1 = ratio * policy_advantages
@@ -635,26 +678,27 @@ class PPOTrainer(Trainer):
                 )
                 policy_loss = -torch.min(surr1, surr2).mean()
                 if self.use_ctde:
-                    value_loss = torch.zeros((), dtype=self.dtype, device=self.device)
+                    value_loss = torch.zeros((), dtype=torch.float32, device=self.device)
                     loss = policy_loss - self.entropy_coef * entropy
                 else:
-                    value_loss = 0.5 * (returns - value.squeeze(-1)).pow(2).mean()
+                    value_loss = 0.5 * (returns - value_f32).pow(2).mean()
                     loss = policy_loss + 0.5 * value_loss - self.entropy_coef * entropy
 
                 optimizer = self._get_optimizer(agent.agent_id)
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
+                self._optimizer_step(optimizer, loss, agent.policy)
 
                 if self.use_ctde:
                     sampled_global_obs = buffer["global_obs"].index_select(0, mb_buffer_indices)
                     if self.centralized_critic_optimizer is None:
                         raise RuntimeError("Missing centralized critic optimizer for CTDE")
-                    predicted_values = self._critic_value(sampled_global_obs).squeeze(-1)
+                    with self._autocast_context():
+                        predicted_values = self._critic_value(sampled_global_obs).squeeze(-1)
                     critic_loss = 0.5 * (returns.detach() - predicted_values).pow(2).mean()
-                    self.centralized_critic_optimizer.zero_grad(set_to_none=True)
-                    critic_loss.backward()
-                    self.centralized_critic_optimizer.step()
+                    self._optimizer_step(
+                        self.centralized_critic_optimizer,
+                        critic_loss,
+                        self.centralized_critic,
+                    )
                     value_loss = critic_loss.detach()
 
                 epoch_policy_loss += float(policy_loss.item())
@@ -739,7 +783,7 @@ class PPOTrainer(Trainer):
     ) -> torch.Tensor:
         total = int(rewards.shape[0])
         if total <= 0:
-            return torch.empty(0, dtype=self.dtype, device=self.device)
+            return torch.empty(0, dtype=torch.float32, device=self.device)
 
         usable = (total // env_count) * env_count
         if usable <= 0:
@@ -748,7 +792,7 @@ class PPOTrainer(Trainer):
                 values.detach().cpu().tolist(),
                 0.0,
                 dones.detach().cpu().tolist(),
-            ).to(device=self.device, dtype=self.dtype)
+            ).to(device=self.device, dtype=torch.float32)
 
         if usable != total:
             start = total - usable
@@ -756,18 +800,18 @@ class PPOTrainer(Trainer):
             values = values[start:]
             dones = dones[start:]
 
-        rewards_seq = rewards.reshape(-1, env_count)
-        values_seq = values.reshape(-1, env_count)
+        rewards_seq = rewards.to(dtype=torch.float32).reshape(-1, env_count)
+        values_seq = values.to(dtype=torch.float32).reshape(-1, env_count)
         dones_seq = dones.reshape(-1, env_count).to(dtype=torch.bool)
 
         next_values = torch.zeros_like(values_seq)
         if values_seq.shape[0] > 1:
             next_values[:-1] = values_seq[1:]
 
-        advantages = torch.zeros_like(values_seq)
-        gae = torch.zeros(env_count, dtype=self.dtype, device=self.device)
+        advantages = torch.zeros_like(values_seq, dtype=torch.float32)
+        gae = torch.zeros(env_count, dtype=torch.float32, device=self.device)
         for step in range(values_seq.shape[0] - 1, -1, -1):
-            non_terminal = (~dones_seq[step]).to(dtype=self.dtype)
+            non_terminal = (~dones_seq[step]).to(dtype=torch.float32)
             delta = (
                 rewards_seq[step] + self.gamma * next_values[step] * non_terminal - values_seq[step]
             )
@@ -818,13 +862,13 @@ class PPOTrainer(Trainer):
             competitive_zero_sum = hasattr(self.env.config, "score_delta_reward")
             episode_reward = 0.0
             episode_reward_tensor = (
-                torch.zeros((), dtype=self.dtype, device=self.device)
+                torch.zeros((), dtype=torch.float32, device=self.device)
                 if use_torch_fastpath
                 else None
             )
             episode_agent_reward = np.zeros((self.env.config.num_agents,), dtype=np.float64)
             episode_agent_reward_tensor = (
-                torch.zeros((self.env.config.num_agents,), dtype=self.dtype, device=self.device)
+                torch.zeros((self.env.config.num_agents,), dtype=torch.float32, device=self.device)
                 if use_torch_fastpath
                 else None
             )
@@ -862,18 +906,22 @@ class PPOTrainer(Trainer):
                             actor_obs = (
                                 local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
                             )
-                            logits, value = agent.policy(actor_obs)
-                            dist = torch.distributions.Categorical(logits=logits)
+                            with self._autocast_context():
+                                logits, value = agent.policy(actor_obs)
+                            logits_f32 = logits.to(dtype=torch.float32)
+                            if not bool(torch.isfinite(logits_f32).all().item()):
+                                raise RuntimeError("Non-finite logits detected during action sampling")
+                            dist = torch.distributions.Categorical(logits=logits_f32)
                             action = dist.sample()
-                            log_prob = dist.log_prob(action)
+                            log_prob = dist.log_prob(action).to(dtype=torch.float32)
 
                             collected_agent_data[agent.agent_id] = {
                                 "action": action.detach(),
                                 "log_prob": log_prob.detach(),
                                 "value": (
-                                    centralized_values
+                                    centralized_values.to(dtype=torch.float32)
                                     if centralized_values is not None
-                                    else value.squeeze(-1).detach()
+                                    else value.squeeze(-1).detach().to(dtype=torch.float32)
                                 ),
                             }
                             env_actions[:, agent.agent_id] = action.detach()
@@ -979,15 +1027,19 @@ class PPOTrainer(Trainer):
                 for agent in self.agents:
                     agent.policy.eval()
                     with torch.no_grad():
-                        logits, value = agent.policy(obs_tensor)
-                        dist = torch.distributions.Categorical(logits=logits)
+                        with self._autocast_context():
+                            logits, value = agent.policy(obs_tensor)
+                        logits_f32 = logits.to(dtype=torch.float32)
+                        if not bool(torch.isfinite(logits_f32).all().item()):
+                            raise RuntimeError("Non-finite logits detected during action sampling")
+                        dist = torch.distributions.Categorical(logits=logits_f32)
                         action = dist.sample()
-                        log_prob = dist.log_prob(action)
+                        log_prob = dist.log_prob(action).to(dtype=torch.float32)
 
                     collected_agent_data[agent.agent_id] = {
                         "action": action,
                         "log_prob": log_prob,
-                        "value": value,
+                        "value": value.squeeze(-1).to(dtype=torch.float32),
                     }
 
                     if isinstance(self.env, SimTorchEnv):
@@ -1151,16 +1203,23 @@ class PPOTrainer(Trainer):
 
                         # Compute returns (advantages + values)
                         returns = advantages + torch.tensor(
-                            values, dtype=self.dtype, device=self.device
+                            values, dtype=torch.float32, device=self.device
                         )
 
                         # PPO update for each step in trajectory
                         for i, exp in enumerate(trajectory):
-                            logits, value = agent.policy(exp.observation)
-                            dist = torch.distributions.Categorical(logits=logits)
+                            with self._autocast_context():
+                                logits, value = agent.policy(exp.observation)
+                            logits_f32 = logits.to(dtype=torch.float32)
+                            if not bool(torch.isfinite(logits_f32).all().item()):
+                                raise RuntimeError("Non-finite logits detected during PPO update")
+                            dist = torch.distributions.Categorical(logits=logits_f32)
                             log_prob = dist.log_prob(exp.action)
 
-                            ratio = torch.exp(log_prob - exp.log_prob)
+                            ratio = torch.exp(
+                                log_prob.to(dtype=torch.float32)
+                                - exp.log_prob.to(dtype=torch.float32)
+                            )
 
                             adv = advantages[i]
                             surr1 = ratio * adv
@@ -1170,14 +1229,14 @@ class PPOTrainer(Trainer):
                             )
                             policy_loss = -torch.min(surr1, surr2).mean()
 
-                            value_loss = 0.5 * (returns[i] - value.squeeze()).pow(2).mean()
+                            value_loss = 0.5 * (
+                                returns[i] - value.squeeze().to(dtype=torch.float32)
+                            ).pow(2).mean()
 
                             loss = policy_loss + 0.5 * value_loss
 
                             optimizer = self._get_optimizer(agent.agent_id)
-                            optimizer.zero_grad()
-                            loss.backward()
-                            optimizer.step()
+                            self._optimizer_step(optimizer, loss, agent.policy)
 
                         # Beautiful epoch logging
                         training_logger.log_epoch(

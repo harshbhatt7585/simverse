@@ -12,7 +12,7 @@ class ShapeDrawConfig:
     seed: Optional[int] = None
     min_brush: int = 1
     max_brush: int = 5
-    draw_penalty: float = 0.001
+    draw_penalty: float = 0.0
     wrong_draw_penalty: float = 0.005
     step_penalty: float = 0.0
     completion_bonus: float = 2.0
