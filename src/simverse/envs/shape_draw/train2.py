@@ -41,10 +41,27 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train ShapeDraw PPO agent (vectorized env)")
     parser.add_argument("--num-envs", type=int, default=64, help="Parallel environment count")
     parser.add_argument("--wandb", choices=["on", "off"], default="off")
+    parser.add_argument(
+        "--recording",
+        choices=["on", "off"],
+        default="on",
+        help="Enable or disable episode recording JSON dumps",
+    )
+    parser.add_argument(
+        "--recording-dir",
+        type=str,
+        default="recordings/shape_draw",
+        help="Directory to write episode recordings when --recording on",
+    )
     return parser.parse_args()
 
 
-def train(use_wandb: bool = False, num_envs: int = 64) -> None:
+def train(
+    use_wandb: bool = False,
+    num_envs: int = 64,
+    recording: bool = True,
+    recording_dir: str = "recordings/shape_draw",
+) -> None:
     training_config = build_training_config(num_agents=1, num_envs=num_envs)
 
     config = ShapeDrawConfig(
@@ -85,7 +102,7 @@ def train(use_wandb: bool = False, num_envs: int = 64) -> None:
         config=training_config,
         project_name="simverse-shape-draw",
         run_name="ppo-shape-draw-vectorized",
-        episode_save_dir="recordings/shape_draw",
+        episode_save_dir=recording_dir if recording else None,
         device=training_config["device"],
         batch_size=training_config["batch_size"],
         buffer_size=training_config["buffer_size"],
@@ -106,4 +123,9 @@ def train(use_wandb: bool = False, num_envs: int = 64) -> None:
 
 if __name__ == "__main__":
     cli_args = parse_args()
-    train(use_wandb=cli_args.wandb == "on", num_envs=cli_args.num_envs)
+    train(
+        use_wandb=cli_args.wandb == "on",
+        num_envs=cli_args.num_envs,
+        recording=cli_args.recording == "on",
+        recording_dir=cli_args.recording_dir,
+    )
