@@ -44,7 +44,9 @@ class SnakeTorchEnv(SimTorchEnv):
             raise ValueError("Snake requires width/height >= 5")
 
         self.max_cells = self.width * self.height
-        self.interior_cells = (self.width - 2) * (self.height - 2)
+        self.interior_width = self.width - 2
+        self.interior_height = self.height - 2
+        self.interior_cells = self.interior_width * self.interior_height
         max_straight_length = max(self.width - 2, self.height - 2)
         self.init_length = max(
             2,
@@ -63,6 +65,10 @@ class SnakeTorchEnv(SimTorchEnv):
         )
         self.register_buffer("direction", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("food_pos", torch.zeros((self.num_envs, 2), dtype=torch.int64))
+        self.register_buffer(
+            "occupied_grid",
+            torch.zeros((self.num_envs, self.height, self.width), dtype=torch.bool),
+        )
 
         self.register_buffer("steps", torch.zeros(self.num_envs, dtype=torch.int64))
         self.register_buffer("score", torch.zeros(self.num_envs, dtype=torch.int64))
@@ -105,7 +111,10 @@ class SnakeTorchEnv(SimTorchEnv):
         )
         self.register_buffer("opposite_direction", torch.tensor([1, 0, 3, 2], dtype=torch.int64))
         self.register_buffer("env_idx", torch.arange(self.num_envs, dtype=torch.int64))
-        self.register_buffer("cell_idx", torch.arange(self.max_cells, dtype=torch.int64))
+        self.register_buffer(
+            "init_segment_offsets",
+            torch.arange(self.init_length, dtype=torch.int64),
+        )
 
         self.to(self.device)
 
@@ -149,7 +158,8 @@ class SnakeTorchEnv(SimTorchEnv):
             device=self.device,
         )
         active = ~self.done
-        if not bool(active.any().item()):
+        active_indices = torch.nonzero(active, as_tuple=True)[0]
+        if active_indices.numel() == 0:
             obs = self._get_observation()
             info = {
                 "winner": self.winner.clone(),
@@ -160,63 +170,68 @@ class SnakeTorchEnv(SimTorchEnv):
 
         chosen_actions = action_tensor[:, 0]
         valid_actions = (chosen_actions >= 0) & (chosen_actions <= self.ACTION_RIGHT)
-
-        next_direction = self.direction.clone()
         assign_mask = active & valid_actions
-        if bool(assign_mask.any().item()):
-            next_direction[assign_mask] = chosen_actions[assign_mask]
+        next_direction = torch.where(assign_mask, chosen_actions, self.direction)
 
         reverse_mask = (
-            active
-            & valid_actions
+            assign_mask
             & (self.snake_length > 1)
             & (chosen_actions == self.opposite_direction[self.direction])
         )
-        if bool(reverse_mask.any().item()):
-            next_direction[reverse_mask] = self.direction[reverse_mask]
-
+        next_direction = torch.where(reverse_mask, self.direction, next_direction)
         self.direction.copy_(next_direction)
 
         head = self.snake_segments[:, 0, :]
+        tail_idx = torch.clamp(self.snake_length - 1, min=0)
+        tail_x = self.snake_segments[self.env_idx, tail_idx, 0]
+        tail_y = self.snake_segments[self.env_idx, tail_idx, 1]
         delta = self.direction_deltas[self.direction]
         new_head = head + delta
+        new_x = new_head[:, 0]
+        new_y = new_head[:, 1]
 
-        ate_food = (
-            active
-            & (new_head[:, 0] == self.food_pos[:, 0])
-            & (new_head[:, 1] == self.food_pos[:, 1])
-        )
-
-        collision_length = self.snake_length - (~ate_food).to(torch.int64)
-        collision_length = torch.clamp(collision_length, min=0, max=self.max_cells)
-        occupied_mask = self.cell_idx.unsqueeze(0) < collision_length.unsqueeze(1)
-        collision_mask = (
-            (self.snake_segments[:, :, 0] == new_head[:, 0].unsqueeze(1))
-            & (self.snake_segments[:, :, 1] == new_head[:, 1].unsqueeze(1))
-            & occupied_mask
-        )
-        self_collision = active & collision_mask.any(dim=1)
+        ate_food = active & (new_x == self.food_pos[:, 0]) & (new_y == self.food_pos[:, 1])
 
         wall_collision = active & (
-            (new_head[:, 0] <= 0)
-            | (new_head[:, 0] >= (self.width - 1))
-            | (new_head[:, 1] <= 0)
-            | (new_head[:, 1] >= (self.height - 1))
+            (new_x <= 0)
+            | (new_x >= (self.width - 1))
+            | (new_y <= 0)
+            | (new_y >= (self.height - 1))
         )
+
+        clamped_x = torch.clamp(new_x, 0, self.width - 1)
+        clamped_y = torch.clamp(new_y, 0, self.height - 1)
+        occupied_at_new = self.occupied_grid[self.env_idx, clamped_y, clamped_x]
+        moving_into_tail = (new_x == tail_x) & (new_y == tail_y) & (~ate_food)
+        self_collision = active & occupied_at_new & (~moving_into_tail)
 
         crashed = active & (self_collision | wall_collision)
         moved = active & (~crashed)
+        self.steps[active_indices] += 1
 
         moved_indices = torch.nonzero(moved, as_tuple=True)[0]
         if moved_indices.numel() > 0:
-            self.snake_segments[moved_indices, 1:, :] = self.snake_segments[moved_indices, :-1, :]
+            moved_lengths = self.snake_length[moved_indices]
+            shift_cells = int(moved_lengths.max().item())
+            self.snake_segments[
+                moved_indices,
+                1 : shift_cells + 1,
+                :,
+            ] = self.snake_segments[moved_indices, :shift_cells, :]
             self.snake_segments[moved_indices, 0, :] = new_head[moved_indices]
 
-            self.steps[moved_indices] += 1
+            moved_non_grow_indices = torch.nonzero(moved & (~ate_food), as_tuple=True)[0]
+            if moved_non_grow_indices.numel() > 0:
+                self.occupied_grid[
+                    moved_non_grow_indices,
+                    tail_y[moved_non_grow_indices],
+                    tail_x[moved_non_grow_indices],
+                ] = False
 
-            grew_mask = ate_food[moved_indices]
-            if bool(grew_mask.any().item()):
-                grew_indices = moved_indices[grew_mask]
+            self.occupied_grid[moved_indices, new_y[moved_indices], new_x[moved_indices]] = True
+
+            grew_indices = torch.nonzero(moved & ate_food, as_tuple=True)[0]
+            if grew_indices.numel() > 0:
                 self.snake_length[grew_indices] = torch.clamp(
                     self.snake_length[grew_indices] + 1,
                     max=self.max_cells,
@@ -227,13 +242,13 @@ class SnakeTorchEnv(SimTorchEnv):
 
         crashed_indices = torch.nonzero(crashed, as_tuple=True)[0]
         if crashed_indices.numel() > 0:
-            self.steps[crashed_indices] += 1
             rewards[crashed_indices, 0] -= float(self.config.crash_penalty)
             self.winner[crashed_indices] = self.WINNER_LOSE
 
         timed_out = active & (self.steps >= int(self.config.max_steps))
-        if bool(timed_out.any().item()):
-            self.winner[timed_out & (~crashed)] = self.WINNER_WIN
+        timed_out_winners = torch.nonzero(timed_out & (~crashed), as_tuple=True)[0]
+        if timed_out_winners.numel() > 0:
+            self.winner[timed_out_winners] = self.WINNER_WIN
 
         self.done |= crashed | timed_out
 
@@ -304,6 +319,7 @@ class SnakeTorchEnv(SimTorchEnv):
         self.steps[env_indices] = 0
         self.score[env_indices] = 0
         self.snake_length[env_indices] = self.init_length
+        self.occupied_grid[env_indices, :, :] = False
 
         if (self.width - 2) >= self.init_length and (self.height - 2) >= self.init_length:
             directions = torch.randint(0, 4, (count,), device=self.device, dtype=torch.int64)
@@ -331,8 +347,9 @@ class SnakeTorchEnv(SimTorchEnv):
         length_minus_one = self.init_length - 1
 
         up_mask = directions == self.ACTION_UP
-        if bool(up_mask.any().item()):
-            up_count = int(up_mask.sum().item())
+        up_indices = torch.nonzero(up_mask, as_tuple=True)[0]
+        if up_indices.numel() > 0:
+            up_count = int(up_indices.numel())
             head_x[up_mask] = torch.randint(
                 1, self.width - 1, (up_count,), device=self.device, dtype=torch.int64
             )
@@ -345,8 +362,9 @@ class SnakeTorchEnv(SimTorchEnv):
             )
 
         down_mask = directions == self.ACTION_DOWN
-        if bool(down_mask.any().item()):
-            down_count = int(down_mask.sum().item())
+        down_indices = torch.nonzero(down_mask, as_tuple=True)[0]
+        if down_indices.numel() > 0:
+            down_count = int(down_indices.numel())
             head_x[down_mask] = torch.randint(
                 1, self.width - 1, (down_count,), device=self.device, dtype=torch.int64
             )
@@ -359,8 +377,9 @@ class SnakeTorchEnv(SimTorchEnv):
             )
 
         left_mask = directions == self.ACTION_LEFT
-        if bool(left_mask.any().item()):
-            left_count = int(left_mask.sum().item())
+        left_indices = torch.nonzero(left_mask, as_tuple=True)[0]
+        if left_indices.numel() > 0:
+            left_count = int(left_indices.numel())
             head_x[left_mask] = torch.randint(
                 1,
                 self.width - length_minus_one - 1,
@@ -373,8 +392,9 @@ class SnakeTorchEnv(SimTorchEnv):
             )
 
         right_mask = directions == self.ACTION_RIGHT
-        if bool(right_mask.any().item()):
-            right_count = int(right_mask.sum().item())
+        right_indices = torch.nonzero(right_mask, as_tuple=True)[0]
+        if right_indices.numel() > 0:
+            right_count = int(right_indices.numel())
             head_x[right_mask] = torch.randint(
                 1 + length_minus_one,
                 self.width - 1,
@@ -388,11 +408,16 @@ class SnakeTorchEnv(SimTorchEnv):
 
         self.snake_segments[env_indices, :, :] = 0
         delta = self.direction_deltas[directions]
-        dx = delta[:, 0]
-        dy = delta[:, 1]
-        for segment_idx in range(self.init_length):
-            self.snake_segments[env_indices, segment_idx, 0] = head_x - segment_idx * dx
-            self.snake_segments[env_indices, segment_idx, 1] = head_y - segment_idx * dy
+        offsets = self.init_segment_offsets.unsqueeze(0)
+        dx = delta[:, 0].unsqueeze(1)
+        dy = delta[:, 1].unsqueeze(1)
+        self.snake_segments[env_indices, : self.init_length, 0] = head_x.unsqueeze(1) - offsets * dx
+        self.snake_segments[env_indices, : self.init_length, 1] = head_y.unsqueeze(1) - offsets * dy
+
+        env_grid = env_indices.unsqueeze(1).expand(-1, self.init_length)
+        seg_x = self.snake_segments[env_indices, : self.init_length, 0]
+        seg_y = self.snake_segments[env_indices, : self.init_length, 1]
+        self.occupied_grid[env_grid, seg_y, seg_x] = True
 
         self._spawn_food_for_envs(env_indices)
 
@@ -404,8 +429,8 @@ class SnakeTorchEnv(SimTorchEnv):
         lengths = self.snake_length[env_indices]
         full_mask = lengths >= self.interior_cells
 
-        if bool(full_mask.any().item()):
-            full_envs = env_indices[full_mask]
+        full_envs = env_indices[full_mask]
+        if full_envs.numel() > 0:
             self.food_pos[full_envs, 0] = 1
             self.food_pos[full_envs, 1] = 1
             self.done[full_envs] = True
@@ -424,16 +449,11 @@ class SnakeTorchEnv(SimTorchEnv):
             fx = torch.randint(1, self.width - 1, (count,), device=self.device, dtype=torch.int64)
             fy = torch.randint(1, self.height - 1, (count,), device=self.device, dtype=torch.int64)
 
-            seg_x = self.snake_segments[pending, :, 0]
-            seg_y = self.snake_segments[pending, :, 1]
-            occupied_mask = self.cell_idx.unsqueeze(0) < self.snake_length[pending].unsqueeze(1)
-            occupied = (
-                (seg_x == fx.unsqueeze(1)) & (seg_y == fy.unsqueeze(1)) & occupied_mask
-            ).any(dim=1)
+            occupied = self.occupied_grid[pending, fy, fx]
 
             valid = ~occupied
-            if bool(valid.any().item()):
-                valid_envs = pending[valid]
+            valid_envs = pending[valid]
+            if valid_envs.numel() > 0:
                 self.food_pos[valid_envs, 0] = fx[valid]
                 self.food_pos[valid_envs, 1] = fy[valid]
 
@@ -446,21 +466,22 @@ class SnakeTorchEnv(SimTorchEnv):
             self._spawn_food_fallback(int(env_index))
 
     def _spawn_food_fallback(self, env_index: int) -> None:
-        length = int(self.snake_length[env_index].item())
-        occupied = {
-            (
-                int(self.snake_segments[env_index, seg_idx, 0].item()),
-                int(self.snake_segments[env_index, seg_idx, 1].item()),
+        free_cells = torch.nonzero(
+            ~self.occupied_grid[env_index, 1 : self.height - 1, 1 : self.width - 1].reshape(-1),
+            as_tuple=True,
+        )[0]
+        if free_cells.numel() > 0:
+            random_idx = torch.randint(
+                0,
+                int(free_cells.numel()),
+                (1,),
+                device=self.device,
+                dtype=torch.int64,
             )
-            for seg_idx in range(length)
-        }
-
-        for y in range(1, self.height - 1):
-            for x in range(1, self.width - 1):
-                if (x, y) not in occupied:
-                    self.food_pos[env_index, 0] = x
-                    self.food_pos[env_index, 1] = y
-                    return
+            chosen = int(free_cells[random_idx].item())
+            self.food_pos[env_index, 0] = (chosen % self.interior_width) + 1
+            self.food_pos[env_index, 1] = (chosen // self.interior_width) + 1
+            return
 
         self.food_pos[env_index, 0] = 1
         self.food_pos[env_index, 1] = 1
@@ -477,19 +498,9 @@ class SnakeTorchEnv(SimTorchEnv):
         head_y = self.snake_segments[:, 0, 1]
         self.obs_buffer[self.env_idx, 2, head_y, head_x] = 1.0
 
-        body_mask = (self.cell_idx.unsqueeze(0) < self.snake_length.unsqueeze(1)) & (
-            self.cell_idx.unsqueeze(0) > 0
-        )
-        if bool(body_mask.any().item()):
-            env_ids = self.env_idx.unsqueeze(1).expand(-1, self.max_cells)
-            body_x = self.snake_segments[:, :, 0]
-            body_y = self.snake_segments[:, :, 1]
-            self.obs_buffer[env_ids[body_mask], 3, body_y[body_mask], body_x[body_mask]] = 1.0
-
-        for direction in range(4):
-            direction_mask = self.direction == direction
-            if bool(direction_mask.any().item()):
-                self.obs_buffer[direction_mask, 4 + direction, :, :] = 1.0
+        self.obs_buffer[:, 3].copy_(self.occupied_grid)
+        self.obs_buffer[self.env_idx, 3, head_y, head_x] = 0.0
+        self.obs_buffer[self.env_idx, 4 + self.direction, :, :] = 1.0
 
         return {
             "obs": self.obs_buffer,
