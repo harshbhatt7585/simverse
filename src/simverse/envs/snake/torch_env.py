@@ -204,7 +204,6 @@ class SnakeTorchEnv(SimTorchEnv):
             self.snake_segments[moved_indices, 0, :] = new_head[moved_indices]
 
             self.steps[moved_indices] += 1
-            rewards[moved_indices, 0] += float(self.config.step_reward)
 
             grew_mask = ate_food[moved_indices]
             if bool(grew_mask.any().item()):

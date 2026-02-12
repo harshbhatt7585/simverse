@@ -11,7 +11,6 @@ class SnakeConfig:
     max_steps: int = 300
     init_length: int = 3
     food_reward: float = 1.0
-    step_reward: float = 0.01
     crash_penalty: float = 1.0
     seed: int | None = None
     policies: List[Any] = field(default_factory=list)

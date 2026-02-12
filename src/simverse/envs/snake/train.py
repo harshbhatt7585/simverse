@@ -51,7 +51,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=300, help="Max steps per episode")
     parser.add_argument("--init-length", type=int, default=3, help="Initial snake length")
     parser.add_argument("--food-reward", type=float, default=1.0)
-    parser.add_argument("--step-reward", type=float, default=0.01)
     parser.add_argument("--crash-penalty", type=float, default=1.0)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=None)
@@ -68,7 +67,6 @@ def train(
     max_steps: int = 300,
     init_length: int = 3,
     food_reward: float = 1.0,
-    step_reward: float = 0.01,
     crash_penalty: float = 1.0,
     lr: float = 3e-4,
     seed: int | None = None,
@@ -96,7 +94,6 @@ def train(
         max_steps=max(1, int(max_steps)),
         init_length=max(2, int(init_length)),
         food_reward=float(food_reward),
-        step_reward=float(step_reward),
         crash_penalty=float(crash_penalty),
         seed=seed,
         policies=[],
@@ -191,7 +188,6 @@ if __name__ == "__main__":
         max_steps=cli_args.max_steps,
         init_length=cli_args.init_length,
         food_reward=cli_args.food_reward,
-        step_reward=cli_args.step_reward,
         crash_penalty=cli_args.crash_penalty,
         lr=cli_args.lr,
         seed=cli_args.seed,
