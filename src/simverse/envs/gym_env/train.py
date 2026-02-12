@@ -229,8 +229,8 @@ def train(
         np.random.seed(int(seed))
         torch.manual_seed(int(seed))
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    device = "cuda" if torch.cuda.is_available() else "mps"
+    dtype = torch.float16 if device == "cuda" else torch.bfloat16
 
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
