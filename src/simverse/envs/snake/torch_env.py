@@ -202,6 +202,11 @@ class SnakeTorchEnv(SimTorchEnv):
         self,
         actions: torch.Tensor | Sequence[int] | np.ndarray | Dict[int, int] | None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        if self.num_envs > 1 and bool(getattr(self.config, "auto_reset_done_envs", True)):
+            done_indices = torch.nonzero(self.done, as_tuple=True)[0]
+            if done_indices.numel() > 0:
+                self._reset_indices(done_indices)
+
         action_tensor = self._normalize_actions(actions)
 
         rewards = torch.zeros(
@@ -241,6 +246,10 @@ class SnakeTorchEnv(SimTorchEnv):
         new_head = head + delta
         new_x = new_head[:, 0]
         new_y = new_head[:, 1]
+        prev_dist = (head[:, 0] - self.food_pos[:, 0]).abs() + (
+            head[:, 1] - self.food_pos[:, 1]
+        ).abs()
+        new_dist = (new_x - self.food_pos[:, 0]).abs() + (new_y - self.food_pos[:, 1]).abs()
 
         ate_food = active & (new_x == self.food_pos[:, 0]) & (new_y == self.food_pos[:, 1])
 
@@ -262,9 +271,16 @@ class SnakeTorchEnv(SimTorchEnv):
 
         moved_indices = torch.nonzero(moved, as_tuple=True)[0]
         if moved_indices.numel() > 0:
-            bonus_indices = moved_indices[(self.steps[moved_indices] % 10) == 0]
+            bonus_every = max(int(getattr(self.config, "survival_bonus_every", 10)), 1)
+            bonus_value = float(getattr(self.config, "survival_bonus", 1.0))
+            bonus_indices = moved_indices[(self.steps[moved_indices] % bonus_every) == 0]
             if bonus_indices.numel() > 0:
-                rewards[bonus_indices, 0] += 1.0
+                rewards[bonus_indices, 0] += bonus_value
+
+            progress_scale = float(getattr(self.config, "distance_reward_scale", 0.0))
+            if progress_scale != 0.0:
+                progress = (prev_dist[moved_indices] - new_dist[moved_indices]).to(dtype=self.dtype)
+                rewards[moved_indices, 0] += progress_scale * progress
 
             moved_lengths = self.snake_length[moved_indices]
             shift_cells = int(moved_lengths.max().item())
@@ -313,6 +329,7 @@ class SnakeTorchEnv(SimTorchEnv):
             "steps": self.steps.clone(),
             "score": self.score.clone(),
             "termination_reason": self.termination_reason.clone(),
+            "distance_to_food": new_dist.clone(),
         }
         return obs, rewards, self.done.clone(), info
 
