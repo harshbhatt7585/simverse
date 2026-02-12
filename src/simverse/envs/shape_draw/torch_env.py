@@ -204,12 +204,9 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         )
         center_x = self.width // 2
         center_y = self.height // 2
+        max_radius = max(1, min(self.width, self.height) // 2)
+        size = int(np.clip(self.config.target_radius, 1, max_radius))
         for env_idx in range(self.num_envs):
-            size = int(
-                torch.randint(
-                    max(6, self.width // 8), max(7, self.width // 4), (1,), device=self.device
-                ).item()
-            )
             mask = self._circle_mask(center_x, center_y, size)
             targets[env_idx, 0][mask] = 1.0
         return targets

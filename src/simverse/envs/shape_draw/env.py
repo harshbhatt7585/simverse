@@ -173,7 +173,8 @@ class ShapeDrawEnv(SimEnv):
         target = np.zeros((1, self.height, self.width), dtype=np.float32)
         cx = self.width // 2
         cy = self.height // 2
-        size = int(self.rng.integers(max(6, self.width // 8), max(7, self.width // 4)))
+        max_radius = max(1, min(self.width, self.height) // 2)
+        size = int(np.clip(self.config.target_radius, 1, max_radius))
         mask = self._circle_mask(cx, cy, size)
         target[0, mask] = 1.0
         return target
