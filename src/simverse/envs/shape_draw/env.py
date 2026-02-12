@@ -123,7 +123,11 @@ class ShapeDrawEnv(SimEnv):
         canvas_mask = self.canvas[0] > 0.5
         newly_filled = np.logical_and(canvas_mask, np.logical_not(prev_canvas_mask))
         new_target_fills = np.logical_and(newly_filled, self.target_mask)
+        new_wrong_fills = np.logical_and(newly_filled, np.logical_not(self.target_mask))
         reward = float(new_target_fills.sum()) / float(self.target_pixels)
+        reward -= float(self.config.wrong_draw_penalty) * (
+            float(new_wrong_fills.sum()) / float(self.target_pixels)
+        )
         reward -= float(self.config.step_penalty)
         if self.pen_down:
             reward -= float(self.config.draw_penalty)
@@ -167,8 +171,8 @@ class ShapeDrawEnv(SimEnv):
 
     def _sample_target(self) -> np.ndarray:
         target = np.zeros((1, self.height, self.width), dtype=np.float32)
-        cx = int(self.rng.integers(self.width // 4, self.width * 3 // 4))
-        cy = int(self.rng.integers(self.height // 4, self.height * 3 // 4))
+        cx = self.width // 2
+        cy = self.height // 2
         size = int(self.rng.integers(max(6, self.width // 8), max(7, self.width // 4)))
         mask = self._circle_mask(cx, cy, size)
         target[0, mask] = 1.0

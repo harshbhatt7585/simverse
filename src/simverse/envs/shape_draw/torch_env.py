@@ -153,8 +153,13 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         canvas_mask = self.canvas > 0.5
         newly_filled = canvas_mask & (~prev_canvas_mask)
         new_target_fills = newly_filled & self.target_mask
+        new_wrong_fills = newly_filled & (~self.target_mask)
         filled_counts = new_target_fills.sum(dim=(1, 2, 3)).to(self.dtype)
+        wrong_counts = new_wrong_fills.sum(dim=(1, 2, 3)).to(self.dtype)
         rewards[:, 0] = filled_counts / torch.clamp(self.target_pixels, min=1.0)
+        rewards[:, 0] -= float(self.config.wrong_draw_penalty) * (
+            wrong_counts / torch.clamp(self.target_pixels, min=1.0)
+        )
         rewards[:, 0] -= float(self.config.step_penalty)
         rewards[:, 0] -= self.pen_down.to(self.dtype) * float(self.config.draw_penalty)
 
@@ -197,21 +202,15 @@ class ShapeDrawTorchEnv(SimTorchEnv):
         targets = torch.zeros(
             (self.num_envs, 1, self.height, self.width), dtype=self.dtype, device=self.device
         )
+        center_x = self.width // 2
+        center_y = self.height // 2
         for env_idx in range(self.num_envs):
-            cx = int(
-                torch.randint(self.width // 4, self.width * 3 // 4, (1,), device=self.device).item()
-            )
-            cy = int(
-                torch.randint(
-                    self.height // 4, self.height * 3 // 4, (1,), device=self.device
-                ).item()
-            )
             size = int(
                 torch.randint(
                     max(6, self.width // 8), max(7, self.width // 4), (1,), device=self.device
                 ).item()
             )
-            mask = self._circle_mask(cx, cy, size)
+            mask = self._circle_mask(center_x, center_y, size)
             targets[env_idx, 0][mask] = 1.0
         return targets
 
