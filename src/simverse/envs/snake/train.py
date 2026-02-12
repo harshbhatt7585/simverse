@@ -78,7 +78,7 @@ def train(
         torch.manual_seed(int(seed))
 
     device = _resolve_device()
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    dtype = torch.float16 if device == "cuda" else torch.bfloat16
 
     if device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
