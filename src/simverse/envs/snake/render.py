@@ -348,7 +348,7 @@ def render(
     if checkpoint:
         policy = _load_policy_from_checkpoint(
             checkpoint_path=checkpoint,
-            obs_space=env.observation_space,
+            obs_space=env.observation_space["obs"],
             action_space=env.action_space,
             device="cpu",
         )

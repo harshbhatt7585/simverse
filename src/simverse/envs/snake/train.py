@@ -109,7 +109,10 @@ def train(
     policy_specs = [
         PolicySpec(
             name="snake_agent_0",
-            model=SimplePolicy(obs_space=env.observation_space, action_space=env.action_space),
+            model=SimplePolicy(
+                obs_space=env.observation_space["obs"],
+                action_space=env.action_space,
+            ),
         )
     ]
     env.config.policies = policy_specs

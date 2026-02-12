@@ -124,11 +124,34 @@ class SnakeTorchEnv(SimTorchEnv):
 
     @property
     def observation_space(self):
-        return gym.spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(self.obs_channels, self.height, self.width),
-            dtype=np.float32,
+        return gym.spaces.Dict(
+            {
+                "obs": gym.spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(self.obs_channels, self.height, self.width),
+                    dtype=np.float32,
+                ),
+                "done": gym.spaces.MultiBinary(self.num_envs),
+                "steps": gym.spaces.Box(
+                    low=0,
+                    high=max(int(self.config.max_steps), 1),
+                    shape=(self.num_envs,),
+                    dtype=np.int64,
+                ),
+                "score": gym.spaces.Box(
+                    low=0,
+                    high=self.interior_cells,
+                    shape=(self.num_envs,),
+                    dtype=np.int64,
+                ),
+                "termination_reason": gym.spaces.Box(
+                    low=0,
+                    high=4,
+                    shape=(self.num_envs,),
+                    dtype=np.int64,
+                ),
+            }
         )
 
     def assign_agents(self, agents: list[SnakeAgent]) -> None:
