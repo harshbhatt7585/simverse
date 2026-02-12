@@ -68,8 +68,8 @@ def train(
         torch.set_float32_matmul_precision("high")
 
     config = MazeRaceConfig(
-        width=15,
-        height=15,
+        width=7,
+        height=7,
         num_agents=1,
         num_envs=max(1, int(num_envs)),
         max_steps=200,
