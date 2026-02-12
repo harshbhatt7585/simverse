@@ -503,7 +503,9 @@ class SnakeTorchEnv(SimTorchEnv):
         self.obs_buffer[self.env_idx, 4 + self.direction, :, :] = 1.0
 
         return {
-            "obs": self.obs_buffer,
+            # Return a snapshot so caller-side tensors do not alias this mutable buffer
+            # across step() calls.
+            "obs": self.obs_buffer.clone(),
             "done": self.done.clone(),
             "winner": self.winner.clone(),
             "steps": self.steps.clone(),
