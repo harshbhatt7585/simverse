@@ -18,7 +18,9 @@ from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
+from simverse.envs.snake.live_server import LiveRenderServer
 from simverse.envs.snake.torch_env import SnakeTorchEnv
+from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
@@ -62,6 +64,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--wandb", choices=["on", "off"], default="off")
     parser.add_argument("--compile", choices=["on", "off"], default="on")
+    parser.add_argument("--render-server", choices=["on", "off"], default="on")
+    parser.add_argument("--render-host", type=str, default="127.0.0.1")
+    parser.add_argument("--render-port", type=int, default=8766)
+    parser.add_argument("--render-stride", type=int, default=1, help="Stream every Nth frame")
     return parser.parse_args()
 
 
@@ -83,6 +89,10 @@ def train(
     seed: int | None = None,
     use_wandb: bool = False,
     use_compile: bool = True,
+    render_server: bool = True,
+    render_host: str = "127.0.0.1",
+    render_port: int = 8766,
+    render_stride: int = 1,
 ) -> None:
     if seed is not None:
         np.random.seed(int(seed))
@@ -166,6 +176,29 @@ def train(
     }
 
     run_name = f"snake-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    live_server = None
+    frame_sink = None
+    if render_server:
+        live_server = LiveRenderServer(
+            output_path="recordings/snake/live.jsonl",
+            host=render_host,
+            port=render_port,
+            title="Snake Live",
+            frame_stride=render_stride,
+        )
+        live_server.start()
+        live_server.push_meta(
+            {
+                "title": "Snake Live",
+                "env": "snake",
+                "width": config.width,
+                "height": config.height,
+                "channels": int(env.obs_channels),
+            }
+        )
+        training_logger.info(f"Live render server running at {live_server.url()}")
+        frame_sink = live_server.push_frame
+
     loss_trainer = PPOTrainer(
         optimizers=optimizers,
         episodes=training_config["episodes"],
@@ -178,6 +211,7 @@ def train(
         project_name=DEFAULT_WANDB_PROJECT,
         run_name=run_name,
         episode_save_dir="recordings/snake",
+        frame_sink=frame_sink,
         device=training_config["device"],
         batch_size=training_config["batch_size"],
         buffer_size=training_config["buffer_size"],
@@ -193,7 +227,11 @@ def train(
         agent_factory=agent_factory,
     )
 
-    simulator.train(title="Snake Training")
+    try:
+        simulator.train(title="Snake Training")
+    finally:
+        if live_server is not None:
+            live_server.stop()
 
 
 if __name__ == "__main__":
@@ -216,4 +254,8 @@ if __name__ == "__main__":
         seed=cli_args.seed,
         use_wandb=cli_args.wandb == "on",
         use_compile=cli_args.compile == "on",
+        render_server=cli_args.render_server == "on",
+        render_host=cli_args.render_host,
+        render_port=cli_args.render_port,
+        render_stride=cli_args.render_stride,
     )
