@@ -17,37 +17,82 @@ _INDEX_HTML = """<!doctype html>
       :root { color-scheme: dark; }
       body {
         margin: 0;
-        padding: 22px;
-        background: radial-gradient(circle at top, #1b2530, #0b1118);
-        color: #e6edf3;
+        padding: 20px;
+        background: radial-gradient(circle at top, #1f2c3a, #0a0f15 62%);
+        color: #e7eef6;
         font-family: "Trebuchet MS", "Segoe UI", sans-serif;
-        display: flex;
-        gap: 24px;
-        align-items: flex-start;
       }
-      canvas {
-        background: #0f141b;
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        gap: 18px;
+        align-items: start;
+      }
+      .card {
         border-radius: 14px;
         border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+        background: rgba(17, 23, 31, 0.85);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
       }
-      #panel {
-        width: 320px;
-        background: rgba(18, 24, 32, 0.85);
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 14px 16px;
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+      .viewer { padding: 12px; }
+      canvas {
+        width: 100%;
+        max-height: 78vh;
+        object-fit: contain;
+        background: #101824;
+        border-radius: 10px;
       }
-      #title { font-size: 20px; font-weight: 700; margin-bottom: 10px; color: #9dd2ff; }
-      #status { font-size: 14px; line-height: 1.45; white-space: pre-line; }
+      #panel { padding: 14px; }
+      #title { font-size: 20px; font-weight: 700; color: #9ad2ff; margin-bottom: 10px; }
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      button, select, input[type="range"] {
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(28, 38, 51, 0.9);
+        color: #e7eef6;
+        padding: 7px 8px;
+        font-size: 13px;
+      }
+      button:hover { background: rgba(44, 58, 76, 0.95); cursor: pointer; }
+      #scrub-wrap { margin-bottom: 10px; }
+      #scrub { width: 100%; }
+      #status { font-size: 14px; line-height: 1.5; white-space: pre-line; color: #d2dbe6; }
+      #frame-meta { font-size: 12px; color: #98a8ba; margin: 6px 0 10px; }
     </style>
   </head>
   <body>
-    <canvas id="grid"></canvas>
-    <div id="panel">
-      <div id="title">Snake Live</div>
-      <div id="status">Waiting for frames...</div>
+    <div class="layout">
+      <div class="card viewer">
+        <canvas id="grid"></canvas>
+      </div>
+      <div id="panel" class="card">
+        <div id="title">Snake Live</div>
+        <div class="controls">
+          <button id="prev">Prev</button>
+          <button id="play">Pause</button>
+          <button id="next">Next</button>
+          <button id="live">Live: On</button>
+        </div>
+        <div id="scrub-wrap">
+          <input id="scrub" type="range" min="0" max="0" value="0" />
+          <div id="frame-meta">frame 0/0</div>
+        </div>
+        <div class="controls" style="grid-template-columns: 1fr;">
+          <select id="speed">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+        </div>
+        <div id="status">Waiting for frames...</div>
+      </div>
     </div>
     <script>
       const canvas = document.getElementById("grid");
@@ -66,6 +111,18 @@ _INDEX_HTML = """<!doctype html>
 
       let cellSize = 24;
       let lastDims = null;
+      let frameBuffer = [];
+      let currentIndex = -1;
+      let isPlaying = true;
+      let followLive = true;
+      let speed = 1.0;
+      let timer = null;
+
+      const scrub = document.getElementById("scrub");
+      const frameMeta = document.getElementById("frame-meta");
+      const playBtn = document.getElementById("play");
+      const liveBtn = document.getElementById("live");
+      const speedSel = document.getElementById("speed");
 
       function resizeCanvas(width, height) {
         const maxSize = 760;
@@ -172,6 +229,64 @@ _INDEX_HTML = """<!doctype html>
         status.textContent = lines.join("\\n");
       }
 
+      function updateControls() {
+        const max = Math.max(0, frameBuffer.length - 1);
+        scrub.max = String(max);
+        scrub.value = String(Math.max(0, currentIndex));
+        frameMeta.textContent =
+          `frame ${Math.max(0, currentIndex + 1)}/${Math.max(1, frameBuffer.length)}`;
+        playBtn.textContent = isPlaying ? "Pause" : "Play";
+        liveBtn.textContent = followLive ? "Live: On" : "Live: Off";
+      }
+
+      function renderIndex(idx) {
+        if (idx < 0 || idx >= frameBuffer.length) return;
+        currentIndex = idx;
+        drawFrame(frameBuffer[currentIndex]);
+        updateControls();
+      }
+
+      function schedulePlayback() {
+        if (timer) clearInterval(timer);
+        const interval = Math.max(25, Math.floor(1000 / (18 * speed)));
+        timer = setInterval(() => {
+          if (!isPlaying || frameBuffer.length === 0) return;
+          if (followLive) {
+            renderIndex(frameBuffer.length - 1);
+            return;
+          }
+          const next = Math.min(frameBuffer.length - 1, currentIndex + 1);
+          renderIndex(next);
+          if (next >= frameBuffer.length - 1) isPlaying = false;
+        }, interval);
+      }
+
+      document.getElementById("prev").onclick = () => {
+        followLive = false;
+        isPlaying = false;
+        renderIndex(Math.max(0, currentIndex - 1));
+      };
+      document.getElementById("next").onclick = () => {
+        followLive = false;
+        isPlaying = false;
+        renderIndex(Math.min(frameBuffer.length - 1, currentIndex + 1));
+      };
+      playBtn.onclick = () => { isPlaying = !isPlaying; updateControls(); };
+      liveBtn.onclick = () => {
+        followLive = !followLive;
+        if (followLive && frameBuffer.length) renderIndex(frameBuffer.length - 1);
+        updateControls();
+      };
+      speedSel.onchange = () => {
+        speed = parseFloat(speedSel.value || "1");
+        schedulePlayback();
+      };
+      scrub.oninput = () => {
+        followLive = false;
+        isPlaying = false;
+        renderIndex(parseInt(scrub.value, 10) || 0);
+      };
+
       const source = new EventSource("/events");
       source.onmessage = (event) => {
         const payload = JSON.parse(event.data);
@@ -180,9 +295,13 @@ _INDEX_HTML = """<!doctype html>
           return;
         }
         if (payload.type === "frame") {
-          drawFrame(payload.data);
+          frameBuffer.push(payload.data);
+          if (frameBuffer.length > 8000) frameBuffer.shift();
+          if (followLive) renderIndex(frameBuffer.length - 1);
+          updateControls();
         }
       };
+      schedulePlayback();
     </script>
   </body>
 </html>
