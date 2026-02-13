@@ -8,44 +8,6 @@
   min-height: 100vh;
 }
 
-.route-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  padding: 12px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(9, 15, 22, 0.82);
-  backdrop-filter: blur(8px);
-}
-
-.route-nav {
-  display: flex;
-  gap: 10px;
-}
-
-.route-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 88px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #e7eef6;
-  text-decoration: none;
-  font-weight: 600;
-  background: rgba(17, 26, 38, 0.85);
-}
-
-.route-link:hover {
-  background: rgba(29, 44, 62, 0.95);
-}
-
-.route-link.active {
-  background: #2b4a68;
-  border-color: #6fa6d8;
-}
-
 select,
 input,
 button {
