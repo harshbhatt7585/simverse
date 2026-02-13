@@ -304,7 +304,6 @@ def _render_replay(
             info = frame.get("info", {}) if isinstance(frame.get("info", {}), dict) else {}
             step = _extract_scalar_int(frame.get("step"), default=0)
             episode = _extract_scalar_int(frame.get("episode"), default=0)
-            score = _extract_scalar_int(info.get("score"), default=0)
             inferred_length = _infer_length_from_obs(obs)
             length = _extract_scalar_int(
                 info.get("snake_length", info.get("slength")),
@@ -328,7 +327,6 @@ def _render_replay(
                 ("Step", str(step)),
                 ("State", status),
                 ("Termination", f"{_termination_label(term_reason)} ({term_reason})"),
-                ("Score", str(score)),
                 ("Length", str(length)),
                 ("Reward", f"{reward:.3f}"),
                 ("Head", str(head_pos)),
