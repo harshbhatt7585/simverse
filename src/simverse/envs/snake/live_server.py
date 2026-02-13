@@ -117,6 +117,8 @@ _INDEX_HTML = """<!doctype html>
       let followLive = true;
       let speed = 1.0;
       let timer = null;
+      let suppressScrubEvent = false;
+      let isScrubbing = false;
 
       const scrub = document.getElementById("scrub");
       const frameMeta = document.getElementById("frame-meta");
@@ -232,7 +234,11 @@ _INDEX_HTML = """<!doctype html>
       function updateControls() {
         const max = Math.max(0, frameBuffer.length - 1);
         scrub.max = String(max);
-        scrub.value = String(Math.max(0, currentIndex));
+        if (!isScrubbing) {
+          suppressScrubEvent = true;
+          scrub.value = String(Math.min(max, Math.max(0, currentIndex)));
+          suppressScrubEvent = false;
+        }
         frameMeta.textContent =
           `frame ${Math.max(0, currentIndex + 1)}/${Math.max(1, frameBuffer.length)}`;
         playBtn.textContent = isPlaying ? "Pause" : "Play";
@@ -240,10 +246,17 @@ _INDEX_HTML = """<!doctype html>
       }
 
       function renderIndex(idx) {
-        if (idx < 0 || idx >= frameBuffer.length) return;
-        currentIndex = idx;
+        if (frameBuffer.length === 0) return;
+        const clamped = Math.min(frameBuffer.length - 1, Math.max(0, idx));
+        currentIndex = clamped;
         drawFrame(frameBuffer[currentIndex]);
         updateControls();
+      }
+
+      function seekTo(idx) {
+        followLive = false;
+        isPlaying = false;
+        renderIndex(idx);
       }
 
       function schedulePlayback() {
@@ -262,14 +275,10 @@ _INDEX_HTML = """<!doctype html>
       }
 
       document.getElementById("prev").onclick = () => {
-        followLive = false;
-        isPlaying = false;
-        renderIndex(Math.max(0, currentIndex - 1));
+        seekTo(currentIndex - 1);
       };
       document.getElementById("next").onclick = () => {
-        followLive = false;
-        isPlaying = false;
-        renderIndex(Math.min(frameBuffer.length - 1, currentIndex + 1));
+        seekTo(currentIndex + 1);
       };
       playBtn.onclick = () => { isPlaying = !isPlaying; updateControls(); };
       liveBtn.onclick = () => {
@@ -282,10 +291,13 @@ _INDEX_HTML = """<!doctype html>
         schedulePlayback();
       };
       scrub.oninput = () => {
-        followLive = false;
-        isPlaying = false;
-        renderIndex(parseInt(scrub.value, 10) || 0);
+        if (suppressScrubEvent) return;
+        seekTo(parseInt(scrub.value, 10) || 0);
       };
+      scrub.addEventListener("pointerdown", () => { isScrubbing = true; });
+      scrub.addEventListener("pointerup", () => { isScrubbing = false; updateControls(); });
+      scrub.addEventListener("pointercancel", () => { isScrubbing = false; updateControls(); });
+      scrub.addEventListener("blur", () => { isScrubbing = false; updateControls(); });
 
       const source = new EventSource("/events");
       source.onmessage = (event) => {
@@ -296,7 +308,14 @@ _INDEX_HTML = """<!doctype html>
         }
         if (payload.type === "frame") {
           frameBuffer.push(payload.data);
-          if (frameBuffer.length > 8000) frameBuffer.shift();
+          if (frameBuffer.length > 8000) {
+            frameBuffer.shift();
+            if (!followLive && currentIndex > 0) {
+              currentIndex -= 1;
+            } else if (!followLive && currentIndex <= 0) {
+              currentIndex = 0;
+            }
+          }
           if (followLive) renderIndex(frameBuffer.length - 1);
           updateControls();
         }
