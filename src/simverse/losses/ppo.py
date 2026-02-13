@@ -209,12 +209,14 @@ class PPOTrainer(Trainer):
         actions: Dict[int, int],
         rewards: Any,
         info: Dict[str, Any],
+        episode: int,
         step: int,
         done: bool,
     ) -> Dict[str, Any]:
         obs_array = observation.get("obs")
         serialized_obs = obs_array.tolist() if hasattr(obs_array, "tolist") else obs_array
         return {
+            "episode": int(episode),
             "step": step,
             "observation": serialized_obs,
             "agents": observation.get("agents", []),
@@ -966,6 +968,7 @@ class PPOTrainer(Trainer):
                             frame_actions,
                             frame_reward,
                             info_env,
+                            episode + 1,
                             step + 1,
                             bool(done_tensor[env_to_record].item()),
                         )
@@ -1116,6 +1119,7 @@ class PPOTrainer(Trainer):
                         frame_actions,
                         frame_reward,
                         info_list[env_to_record],
+                        episode + 1,
                         step + 1,
                         bool(done_array_cpu[env_to_record]),
                     )

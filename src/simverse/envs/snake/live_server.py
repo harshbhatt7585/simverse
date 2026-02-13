@@ -152,11 +152,13 @@ _INDEX_HTML = """<!doctype html>
 
         const info = frame.info || {};
         const reward = parseReward(frame.rewards);
+        const episode = firstScalar(frame.episode, 0);
         const score = firstScalar(info.score, 0);
         const steps = firstScalar(info.steps, 0);
         const term = firstScalar(info.termination_reason, 0);
         const done = frame.done ? "yes" : "no";
         const lines = [
+          `episode: ${episode}`,
           `step: ${frame.step ?? "?"}`,
           `done: ${done}`,
           `term: ${term}`,
