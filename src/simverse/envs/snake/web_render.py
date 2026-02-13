@@ -88,6 +88,7 @@ def run(
     height: int,
 ) -> None:
     replay_files, replay_dirs = _resolve_replay_sources(replay, replay_dir)
+    replay_file_names = [path.name for path in replay_files]
 
     server = LiveRenderServer(
         output_path=output,
@@ -100,13 +101,30 @@ def run(
     seen = set(replay_files)
     print(f"Open http://{host}:{port}")
 
-    def _play_file(path: Path) -> None:
-        data = json.loads(path.read_text())
-        frames = data.get("frames", [])
-        if not isinstance(frames, list) or not frames:
-            return
-        frame0 = frames[0]
-        w, h = _frame_dims(frame0, width, height)
+    def _build_snapshot(paths: list[Path]) -> tuple[dict, int, int]:
+        all_frames: list[dict] = []
+        w = int(width)
+        h = int(height)
+        for file_idx, path in enumerate(paths):
+            data = json.loads(path.read_text())
+            frames = data.get("frames", [])
+            if not isinstance(frames, list) or not frames:
+                continue
+            fw, fh = _frame_dims(frames[0], width, height)
+            w, h = fw, fh
+            for frame in frames:
+                stream_frame = dict(frame)
+                stream_frame["_replay_file_index"] = int(file_idx)
+                stream_frame["_replay_file_name"] = path.name
+                stream_frame["_replay_total_files"] = len(paths)
+                stream_frame["_replay_episode_index"] = int(file_idx) + 1
+                all_frames.append(stream_frame)
+        snapshot = {"frames": all_frames, "replay_files": [p.name for p in paths]}
+        return snapshot, w, h
+
+    def _publish_snapshot(paths: list[Path]) -> None:
+        snapshot, w, h = _build_snapshot(paths)
+        server.set_snapshot(snapshot)
         server.push_meta(
             {
                 "title": "Snake Replay Web",
@@ -114,30 +132,29 @@ def run(
                 "width": w,
                 "height": h,
                 "channels": 8,
+                "replay_files": [p.name for p in paths],
+                "replay_count": len(paths),
+                "snapshot_url": "/snapshot",
+                "fps": int(fps),
             }
         )
-        for frame in frames:
-            server.push_frame(frame)
-            time.sleep(1.0 / max(1, int(fps)))
 
     try:
+        _publish_snapshot(replay_files)
         while True:
-            for path in replay_files:
-                _play_file(path)
-            if watch and replay_dirs:
-                watch_dir = replay_dirs[0]
-                while True:
-                    files = sorted(watch_dir.glob("*.json"))
-                    new_files = [p for p in files if p not in seen]
-                    if new_files:
-                        replay_files.extend(new_files)
-                        replay_files[:] = sorted(set(replay_files))
-                        seen.update(new_files)
-                        break
-                    time.sleep(max(float(poll), 0.1))
+            if not watch or not replay_dirs:
+                time.sleep(1.0)
                 continue
-            if not loop:
-                break
+            watch_dir = replay_dirs[0]
+            files = sorted(watch_dir.glob("*.json"))
+            new_files = [p for p in files if p not in seen]
+            if new_files:
+                replay_files.extend(new_files)
+                replay_files[:] = sorted(set(replay_files))
+                replay_file_names[:] = [path.name for path in replay_files]
+                seen.update(new_files)
+                _publish_snapshot(replay_files)
+            time.sleep(max(float(poll), 0.1))
     finally:
         server.stop()
 

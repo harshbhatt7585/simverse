@@ -62,7 +62,7 @@ _INDEX_HTML = """<!doctype html>
       #scrub-wrap { margin-bottom: 10px; }
       #scrub { width: 100%; }
       #status { font-size: 14px; line-height: 1.5; white-space: pre-line; color: #d2dbe6; }
-      #frame-meta { font-size: 12px; color: #98a8ba; margin: 6px 0 10px; }
+      #episode-meta { font-size: 12px; color: #98a8ba; margin: 6px 0 10px; }
     </style>
   </head>
   <body>
@@ -73,14 +73,14 @@ _INDEX_HTML = """<!doctype html>
       <div id="panel" class="card">
         <div id="title">Snake Live</div>
         <div class="controls">
-          <button id="prev">Prev</button>
+          <button id="prev">Prev Ep</button>
           <button id="play">Pause</button>
-          <button id="next">Next</button>
+          <button id="next">Next Ep</button>
           <button id="live">Live: On</button>
         </div>
         <div id="scrub-wrap">
           <input id="scrub" type="range" min="0" max="0" value="0" />
-          <div id="frame-meta">frame 0/0</div>
+          <div id="episode-meta">episode 0/0</div>
         </div>
         <div class="controls" style="grid-template-columns: 1fr;">
           <select id="speed">
@@ -113,6 +113,11 @@ _INDEX_HTML = """<!doctype html>
       let lastDims = null;
       let frameBuffer = [];
       let currentIndex = -1;
+      let episodeStartIndices = [];
+      let episodeIds = [];
+      let replayFiles = [];
+      let replayFileFirstFrame = new Map();
+      let currentReplayFileIndex = -1;
       let isPlaying = true;
       let followLive = true;
       let speed = 1.0;
@@ -121,7 +126,7 @@ _INDEX_HTML = """<!doctype html>
       let isScrubbing = false;
 
       const scrub = document.getElementById("scrub");
-      const frameMeta = document.getElementById("frame-meta");
+      const episodeMeta = document.getElementById("episode-meta");
       const playBtn = document.getElementById("play");
       const liveBtn = document.getElementById("live");
       const speedSel = document.getElementById("speed");
@@ -218,7 +223,7 @@ _INDEX_HTML = """<!doctype html>
         const done = frame.done ? "yes" : "no";
         const lines = [
           `episode: ${episode}`,
-          `step: ${frame.step ?? "?"}`,
+          `step: ${frame.step !== undefined ? frame.step : "?"}`,
           `done: ${done}`,
           `term: ${term}`,
           `reward: ${reward.toFixed(3)}`,
@@ -229,18 +234,40 @@ _INDEX_HTML = """<!doctype html>
           `food: (${foodX}, ${foodY})`,
         ];
         status.textContent = lines.join("\\n");
+        currentReplayFileIndex = firstScalar(frame._replay_file_index, -1);
       }
 
       function updateControls() {
-        const max = Math.max(0, frameBuffer.length - 1);
+        const usingReplayFileMap = replayFiles.length > 0;
+        const max = usingReplayFileMap
+          ? Math.max(0, replayFiles.length - 1)
+          : Math.max(0, episodeStartIndices.length - 1);
         scrub.max = String(max);
+        let episodePos = 0;
+        if (usingReplayFileMap) {
+          episodePos = Math.max(0, currentReplayFileIndex);
+        } else {
+          for (let i = 0; i < episodeStartIndices.length; i++) {
+            if (episodeStartIndices[i] <= Math.max(0, currentIndex)) episodePos = i;
+            else break;
+          }
+        }
         if (!isScrubbing) {
           suppressScrubEvent = true;
-          scrub.value = String(Math.min(max, Math.max(0, currentIndex)));
+          scrub.value = String(Math.min(max, Math.max(0, episodePos)));
           suppressScrubEvent = false;
         }
-        frameMeta.textContent =
-          `frame ${Math.max(0, currentIndex + 1)}/${Math.max(1, frameBuffer.length)}`;
+        if (usingReplayFileMap) {
+          const fileName = replayFiles[episodePos] !== undefined ? replayFiles[episodePos] : "?";
+          episodeMeta.textContent =
+            `episode ${Math.max(0, episodePos + 1)}/${Math.max(1, replayFiles.length)} ` +
+            `(${fileName})`;
+        } else {
+          const episodeId = episodeIds[episodePos] !== undefined ? episodeIds[episodePos] : 0;
+          episodeMeta.textContent =
+            `episode ${Math.max(0, episodePos + 1)}/${Math.max(1, episodeIds.length)} ` +
+            `(id=${episodeId})`;
+        }
         playBtn.textContent = isPlaying ? "Pause" : "Play";
         liveBtn.textContent = followLive ? "Live: On" : "Live: Off";
       }
@@ -259,6 +286,29 @@ _INDEX_HTML = """<!doctype html>
         renderIndex(idx);
       }
 
+      function seekToEpisodePos(pos) {
+        if (replayFiles.length > 0) {
+          const clamped = Math.min(replayFiles.length - 1, Math.max(0, pos));
+          const startFrame = replayFileFirstFrame.get(clamped);
+          if (startFrame !== undefined) {
+            seekTo(startFrame);
+            return;
+          }
+          // Fallback to nearest available earlier episode.
+          for (let i = clamped; i >= 0; i--) {
+            const fallbackFrame = replayFileFirstFrame.get(i);
+            if (fallbackFrame !== undefined) {
+              seekTo(fallbackFrame);
+              return;
+            }
+          }
+          return;
+        }
+        if (episodeStartIndices.length === 0) return;
+        const clamped = Math.min(episodeStartIndices.length - 1, Math.max(0, pos));
+        seekTo(episodeStartIndices[clamped]);
+      }
+
       function schedulePlayback() {
         if (timer) clearInterval(timer);
         const interval = Math.max(25, Math.floor(1000 / (18 * speed)));
@@ -268,17 +318,50 @@ _INDEX_HTML = """<!doctype html>
             renderIndex(frameBuffer.length - 1);
             return;
           }
-          const next = Math.min(frameBuffer.length - 1, currentIndex + 1);
-          renderIndex(next);
-          if (next >= frameBuffer.length - 1) isPlaying = false;
+          let episodePos = 0;
+          if (replayFiles.length > 0) {
+            episodePos = Math.max(0, currentReplayFileIndex);
+          } else {
+            for (let i = 0; i < episodeStartIndices.length; i++) {
+              if (episodeStartIndices[i] <= Math.max(0, currentIndex)) episodePos = i;
+              else break;
+            }
+          }
+          const maxEpisodes = replayFiles.length > 0
+            ? replayFiles.length
+            : episodeStartIndices.length;
+          const nextEpisodePos = Math.min(maxEpisodes - 1, episodePos + 1);
+          if (nextEpisodePos === episodePos) {
+            isPlaying = false;
+            return;
+          }
+          seekToEpisodePos(nextEpisodePos);
         }, interval);
       }
 
       document.getElementById("prev").onclick = () => {
-        seekTo(currentIndex - 1);
+        let episodePos = 0;
+        if (replayFiles.length > 0) {
+          episodePos = Math.max(0, currentReplayFileIndex);
+        } else {
+          for (let i = 0; i < episodeStartIndices.length; i++) {
+            if (episodeStartIndices[i] <= Math.max(0, currentIndex)) episodePos = i;
+            else break;
+          }
+        }
+        seekToEpisodePos(episodePos - 1);
       };
       document.getElementById("next").onclick = () => {
-        seekTo(currentIndex + 1);
+        let episodePos = 0;
+        if (replayFiles.length > 0) {
+          episodePos = Math.max(0, currentReplayFileIndex);
+        } else {
+          for (let i = 0; i < episodeStartIndices.length; i++) {
+            if (episodeStartIndices[i] <= Math.max(0, currentIndex)) episodePos = i;
+            else break;
+          }
+        }
+        seekToEpisodePos(episodePos + 1);
       };
       playBtn.onclick = () => { isPlaying = !isPlaying; updateControls(); };
       liveBtn.onclick = () => {
@@ -292,24 +375,87 @@ _INDEX_HTML = """<!doctype html>
       };
       scrub.oninput = () => {
         if (suppressScrubEvent) return;
-        seekTo(parseInt(scrub.value, 10) || 0);
+        seekToEpisodePos(parseInt(scrub.value, 10) || 0);
       };
       scrub.addEventListener("pointerdown", () => { isScrubbing = true; });
       scrub.addEventListener("pointerup", () => { isScrubbing = false; updateControls(); });
       scrub.addEventListener("pointercancel", () => { isScrubbing = false; updateControls(); });
       scrub.addEventListener("blur", () => { isScrubbing = false; updateControls(); });
 
+      async function loadSnapshot(url) {
+        try {
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const snapshot = await response.json();
+          const frames = Array.isArray(snapshot.frames) ? snapshot.frames : [];
+          const files = Array.isArray(snapshot.replay_files) ? snapshot.replay_files : [];
+          frameBuffer = frames;
+          replayFiles = files;
+          episodeStartIndices = [];
+          episodeIds = [];
+          replayFileFirstFrame = new Map();
+          currentReplayFileIndex = -1;
+          for (let i = 0; i < frameBuffer.length; i++) {
+            const frame = frameBuffer[i];
+            const fileIdx = firstScalar(frame && frame._replay_file_index, -1);
+            if (fileIdx >= 0 && !replayFileFirstFrame.has(fileIdx)) {
+              replayFileFirstFrame.set(fileIdx, i);
+            }
+            const frameEpisode = firstScalar(frame && frame.episode, 0);
+            if (episodeIds.length === 0 || episodeIds[episodeIds.length - 1] !== frameEpisode) {
+              episodeIds.push(frameEpisode);
+              episodeStartIndices.push(i);
+            }
+          }
+          followLive = false;
+          isPlaying = false;
+          if (frameBuffer.length > 0) renderIndex(0);
+          else updateControls();
+        } catch (err) {
+          status.textContent = `Failed to load snapshot: ${String(err)}`;
+        }
+      }
+
       const source = new EventSource("/events");
       source.onmessage = (event) => {
         const payload = JSON.parse(event.data);
         if (payload.type === "meta") {
-          document.getElementById("title").textContent = payload.data?.title || "Snake Live";
+          const payloadData = payload.data || {};
+          document.getElementById("title").textContent = payloadData.title || "Snake Live";
+          const fileList = payloadData.replay_files;
+          if (Array.isArray(fileList)) {
+            replayFiles = fileList.slice();
+          }
+          if (typeof payloadData.snapshot_url === "string" && payloadData.snapshot_url.length > 0) {
+            loadSnapshot(payloadData.snapshot_url);
+          }
           return;
         }
         if (payload.type === "frame") {
           frameBuffer.push(payload.data);
+          const replayFileIndex = firstScalar(payload.data && payload.data._replay_file_index, -1);
+          if (replayFileIndex >= 0 && !replayFileFirstFrame.has(replayFileIndex)) {
+            replayFileFirstFrame.set(replayFileIndex, frameBuffer.length - 1);
+          }
+          const frameEpisode = firstScalar(payload.data && payload.data.episode, 0);
+          if (episodeIds.length === 0 || episodeIds[episodeIds.length - 1] !== frameEpisode) {
+            episodeIds.push(frameEpisode);
+            episodeStartIndices.push(frameBuffer.length - 1);
+          }
           if (frameBuffer.length > 8000) {
             frameBuffer.shift();
+            for (let i = 0; i < episodeStartIndices.length; i++) {
+              episodeStartIndices[i] = Math.max(0, episodeStartIndices[i] - 1);
+            }
+            const remapped = new Map();
+            for (const [key, value] of replayFileFirstFrame.entries()) {
+              remapped.set(key, Math.max(0, value - 1));
+            }
+            replayFileFirstFrame = remapped;
+            while (episodeStartIndices.length > 1 && episodeStartIndices[1] === 0) {
+              episodeStartIndices.shift();
+              episodeIds.shift();
+            }
             if (!followLive && currentIndex > 0) {
               currentIndex -= 1;
             } else if (!followLive && currentIndex <= 0) {
@@ -348,6 +494,7 @@ class LiveRenderServer:
         self._thread: Optional[threading.Thread] = None
         self._file = None
         self._meta_payload: Optional[bytes] = None
+        self._snapshot_payload: Optional[bytes] = None
 
     def start(self) -> None:
         if self._server is not None:
@@ -372,9 +519,27 @@ class LiveRenderServer:
                     body = _INDEX_HTML.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
+                    return
+                if self.path.startswith("/snapshot"):
+                    snapshot = server_state._snapshot_payload
+                    if snapshot is None:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                    self.send_header("Content-Length", str(len(snapshot)))
+                    self.end_headers()
+                    self.wfile.write(snapshot)
                     return
                 if self.path.startswith("/events"):
                     self.send_response(200)
@@ -449,6 +614,9 @@ class LiveRenderServer:
         payload = json.dumps({"type": "meta", "data": meta}, separators=(",", ":")).encode("utf-8")
         self._meta_payload = payload
         self._broadcast(payload)
+
+    def set_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        self._snapshot_payload = json.dumps(snapshot, separators=(",", ":")).encode("utf-8")
 
     def push_frame(self, frame: Dict[str, Any]) -> None:
         step = int(frame.get("step", 0))
