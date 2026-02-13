@@ -200,8 +200,6 @@ function Replay({ baseUrl }: ReplayProps) {
         <SnakeRenderer frame={currentFrame} />
       </div>
       <aside className="panel">
-        <h2>Replay</h2>
-
         <label className="inline-label" htmlFor="replay-episode">
           Replay File
         </label>

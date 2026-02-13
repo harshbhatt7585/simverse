@@ -36,16 +36,8 @@ button:hover {
   align-items: start;
 }
 
-.canvas-wrap,
-.panel {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(13, 20, 30, 0.86);
-  box-shadow: 0 14px 38px rgba(2, 8, 20, 0.35);
-}
-
 .canvas-wrap {
-  padding: 12px;
+  padding: 0;
   min-height: 420px;
   display: grid;
   place-items: center;
@@ -61,15 +53,9 @@ button:hover {
 }
 
 .panel {
-  padding: 14px;
+  padding: 0;
   display: grid;
   gap: 10px;
-}
-
-.panel h2 {
-  margin: 0;
-  font-size: 1.15rem;
-  color: #a6d0ff;
 }
 
 .control-row {
