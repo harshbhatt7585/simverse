@@ -1,7 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 
 import './App.css'
-import HomePage from './pages/HomePage'
 import RenderPage from './pages/RenderPage'
 
 function App() {
