@@ -20,15 +20,20 @@ from simverse.envs.snake.torch_env import SnakeTorchEnv
 from simverse.policies.simple import SimplePolicy
 from simverse.render_cli import build_render_parser
 
-HUD_HEIGHT = 84
+SIDEBAR_WIDTH = 340
 COLORS = {
-    "bg": (20, 22, 27),
+    "bg": (16, 20, 24),
     "floor": (242, 245, 247),
-    "wall": (52, 61, 74),
+    "wall": (55, 67, 82),
     "food": (210, 52, 62),
     "head": (40, 147, 66),
     "body": (76, 196, 112),
-    "text": (240, 243, 248),
+    "text": (237, 242, 247),
+    "panel_bg": (23, 28, 34),
+    "panel_border": (61, 74, 90),
+    "panel_heading": (161, 207, 255),
+    "panel_label": (148, 164, 184),
+    "panel_value": (233, 240, 248),
 }
 
 
@@ -91,12 +96,16 @@ def _draw_obs_frame(
     *,
     screen: pygame.Surface,
     font: pygame.font.Font,
+    title_font: pygame.font.Font,
     cell_size: int,
     obs: np.ndarray,
-    hud_text: str,
+    panel_title: str,
+    panel_metrics: list[tuple[str, str]],
+    panel_footer: list[str] | None = None,
 ) -> None:
     height = int(obs.shape[1])
     width = int(obs.shape[2])
+    grid_w_px = width * cell_size
 
     walls = obs[0]
     food = obs[1] if obs.shape[0] > 1 else np.zeros_like(walls)
@@ -138,10 +147,34 @@ def _draw_obs_frame(
         )
         pygame.draw.rect(screen, COLORS["head"], rect, border_radius=max(2, cell_size // 7))
 
-    hud_lines = [line for line in hud_text.split("\n") if line]
-    for idx, line in enumerate(hud_lines[:3]):
-        text = font.render(line, True, COLORS["text"])
-        screen.blit(text, (8, height * cell_size + 10 + idx * 24))
+    panel_rect = pygame.Rect(grid_w_px, 0, SIDEBAR_WIDTH, height * cell_size)
+    pygame.draw.rect(screen, COLORS["panel_bg"], panel_rect)
+    pygame.draw.line(
+        screen,
+        COLORS["panel_border"],
+        (grid_w_px, 0),
+        (grid_w_px, height * cell_size),
+        width=2,
+    )
+
+    title = title_font.render(panel_title, True, COLORS["panel_heading"])
+    screen.blit(title, (grid_w_px + 16, 14))
+
+    y = 54
+    for label, value in panel_metrics:
+        label_text = font.render(label, True, COLORS["panel_label"])
+        value_text = font.render(value, True, COLORS["panel_value"])
+        screen.blit(label_text, (grid_w_px + 16, y))
+        screen.blit(value_text, (grid_w_px + 140, y))
+        y += 24
+
+    if panel_footer:
+        y += 8
+        for line in panel_footer:
+            text = font.render(line, True, COLORS["panel_label"])
+            screen.blit(text, (grid_w_px + 16, y))
+            y += 22
+
     pygame.display.flip()
 
 
@@ -207,9 +240,10 @@ def _render_replay(
     pygame.init()
     grid_w = max(5, int(width))
     grid_h = max(5, int(height))
-    screen = pygame.display.set_mode((grid_w * cell_size, grid_h * cell_size + HUD_HEIGHT))
+    screen = pygame.display.set_mode((grid_w * cell_size + SIDEBAR_WIDTH, grid_h * cell_size))
     pygame.display.set_caption("Simverse Snake Replay")
     font = pygame.font.SysFont("Verdana", 18)
+    title_font = pygame.font.SysFont("Verdana", 22, bold=True)
     clock = pygame.time.Clock()
 
     seen: set[Path] = set()
@@ -246,7 +280,7 @@ def _render_replay(
             if (frame_w, frame_h) != (grid_w, grid_h):
                 grid_w, grid_h = frame_w, frame_h
                 screen = pygame.display.set_mode(
-                    (grid_w * cell_size, grid_h * cell_size + HUD_HEIGHT)
+                    (grid_w * cell_size + SIDEBAR_WIDTH, grid_h * cell_size)
                 )
 
             info = frame.get("info", {}) if isinstance(frame.get("info", {}), dict) else {}
@@ -261,18 +295,28 @@ def _render_replay(
             head_pos = info.get("head_pos", None)
             food_pos = info.get("food_pos", None)
 
-            hud_text = (
-                f"replay={path.name} ep={episode} step={step} state={status} "
-                f"term={_termination_label(term_reason)}({term_reason})\n"
-                f"score={score} length={length} reward={reward:.3f} "
-                f"head={head_pos} food={food_pos}"
-            )
+            metrics = [
+                ("Replay", path.name),
+                ("Episode", str(episode)),
+                ("Step", str(step)),
+                ("State", status),
+                ("Termination", f"{_termination_label(term_reason)} ({term_reason})"),
+                ("Score", str(score)),
+                ("Length", str(length)),
+                ("Reward", f"{reward:.3f}"),
+                ("Head", str(head_pos)),
+                ("Food", str(food_pos)),
+                ("FPS", str(max(1, int(fps)))),
+            ]
             _draw_obs_frame(
                 screen=screen,
                 font=font,
+                title_font=title_font,
                 cell_size=cell_size,
                 obs=obs,
-                hud_text=hud_text,
+                panel_title="Snake Replay",
+                panel_metrics=metrics,
+                panel_footer=["ESC to quit"],
             )
             clock.tick(max(1, int(fps)))
         return True
@@ -397,11 +441,12 @@ def render(
         )
 
     pygame.init()
-    screen_width = env.width * cell_size
-    screen_height = env.height * cell_size + HUD_HEIGHT
+    screen_width = env.width * cell_size + SIDEBAR_WIDTH
+    screen_height = env.height * cell_size
     screen = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("Simverse Snake")
     font = pygame.font.SysFont("Verdana", 18)
+    title_font = pygame.font.SysFont("Verdana", 22, bold=True)
     clock = pygame.time.Clock()
 
     obs = env.reset()
@@ -483,19 +528,30 @@ def render(
         length = int(env.snake_length[0].item())
         term_reason = int(env.termination_reason[0].item())
         status = "done" if episode_done else "running"
-        hud_text = (
-            f"episode={completed_episodes}/{episodes} mode={mode} state={status} "
-            f"term={_termination_label(term_reason)}({term_reason})\n"
-            f"steps={int(env.steps[0].item())}/{max_steps} score={int(env.score[0].item())} "
-            f"length={length} reward={last_reward:.3f} ep_reward={episode_reward:.3f}\n"
-            f"action={last_action} head={head_pos} food={food_pos} arrows=move r=reset"
-        )
+        metrics = [
+            ("Episode", f"{completed_episodes}/{episodes}"),
+            ("Mode", mode),
+            ("State", status),
+            ("Termination", f"{_termination_label(term_reason)} ({term_reason})"),
+            ("Step", f"{int(env.steps[0].item())}/{max_steps}"),
+            ("Score", str(int(env.score[0].item()))),
+            ("Length", str(length)),
+            ("Last Reward", f"{last_reward:.3f}"),
+            ("Ep Reward", f"{episode_reward:.3f}"),
+            ("Action", str(last_action)),
+            ("Head", str(head_pos)),
+            ("Food", str(food_pos)),
+            ("FPS", str(max(1, int(fps)))),
+        ]
         _draw_obs_frame(
             screen=screen,
             font=font,
+            title_font=title_font,
             cell_size=cell_size,
             obs=frame_obs,
-            hud_text=hud_text,
+            panel_title="Snake Metrics",
+            panel_metrics=metrics,
+            panel_footer=["Arrows to move", "R to reset", "Close window to exit"],
         )
 
         clock.tick(max(1, int(fps)))
