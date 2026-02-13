@@ -20,7 +20,7 @@ from simverse.envs.snake.torch_env import SnakeTorchEnv
 from simverse.policies.simple import SimplePolicy
 from simverse.render_cli import build_render_parser
 
-HUD_HEIGHT = 54
+HUD_HEIGHT = 84
 COLORS = {
     "bg": (20, 22, 27),
     "floor": (242, 245, 247),
@@ -138,9 +138,44 @@ def _draw_obs_frame(
         )
         pygame.draw.rect(screen, COLORS["head"], rect, border_radius=max(2, cell_size // 7))
 
-    text = font.render(hud_text, True, COLORS["text"])
-    screen.blit(text, (8, height * cell_size + 16))
+    hud_lines = [line for line in hud_text.split("\n") if line]
+    for idx, line in enumerate(hud_lines[:3]):
+        text = font.render(line, True, COLORS["text"])
+        screen.blit(text, (8, height * cell_size + 10 + idx * 24))
     pygame.display.flip()
+
+
+def _termination_label(reason: int) -> str:
+    if reason == 1:
+        return "wall"
+    if reason == 2:
+        return "self"
+    if reason == 3:
+        return "timeout"
+    if reason == 4:
+        return "full-grid"
+    return "none"
+
+
+def _extract_reward_value(rewards) -> float:
+    if rewards is None:
+        return 0.0
+    if isinstance(rewards, dict):
+        if not rewards:
+            return 0.0
+        rewards = next(iter(rewards.values()))
+    if isinstance(rewards, np.ndarray):
+        if rewards.size == 0:
+            return 0.0
+        rewards = rewards.reshape(-1)[0]
+    elif isinstance(rewards, (list, tuple)):
+        if not rewards:
+            return 0.0
+        rewards = rewards[0]
+    try:
+        return float(rewards)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _render_replay(
@@ -216,14 +251,21 @@ def _render_replay(
 
             info = frame.get("info", {}) if isinstance(frame.get("info", {}), dict) else {}
             step = _extract_scalar_int(frame.get("step"), default=0)
+            episode = _extract_scalar_int(frame.get("episode"), default=0)
             score = _extract_scalar_int(info.get("score"), default=0)
+            length = _extract_scalar_int(info.get("snake_length"), default=0)
             term_reason = _extract_scalar_int(info.get("termination_reason"), default=0)
+            reward = _extract_reward_value(frame.get("rewards"))
             done = bool(frame.get("done", False))
             status = "done" if done else "running"
+            head_pos = info.get("head_pos", None)
+            food_pos = info.get("food_pos", None)
 
             hud_text = (
-                f"replay={path.name} step={step} score={score} "
-                f"term={term_reason} state={status}"
+                f"replay={path.name} ep={episode} step={step} state={status} "
+                f"term={_termination_label(term_reason)}({term_reason})\n"
+                f"score={score} length={length} reward={reward:.3f} "
+                f"head={head_pos} food={food_pos}"
             )
             _draw_obs_frame(
                 screen=screen,
@@ -365,6 +407,9 @@ def render(
     obs = env.reset()
     episode_done = False
     completed_episodes = 0
+    episode_reward = 0.0
+    last_reward = 0.0
+    last_action = -1
 
     running = True
     while running and completed_episodes < episodes:
@@ -397,7 +442,10 @@ def render(
                     action = env.ACTION_RIGHT
 
             step_actions = torch.as_tensor([[action]], dtype=torch.int64)
-            obs, _rewards, done, _info = env.step(step_actions)
+            obs, rewards, done, _info = env.step(step_actions)
+            last_action = int(action)
+            last_reward = float(rewards[0, 0].item())
+            episode_reward += last_reward
             if bool(done[0].item()):
                 episode_done = True
                 completed_episodes += 1
@@ -410,18 +458,37 @@ def render(
         if reset_requested and completed_episodes < episodes:
             obs = env.reset()
             episode_done = False
+            episode_reward = 0.0
+            last_reward = 0.0
+            last_action = -1
 
         if episode_done and auto_reset and completed_episodes < episodes:
             obs = env.reset()
             episode_done = False
+            episode_reward = 0.0
+            last_reward = 0.0
+            last_action = -1
         elif episode_done and not auto_reset:
             running = False
 
         frame_obs = obs["obs"][0].detach().cpu().numpy()
+        head_pos = (
+            int(env.snake_segments[0, 0, 0].item()),
+            int(env.snake_segments[0, 0, 1].item()),
+        )
+        food_pos = (
+            int(env.food_pos[0, 0].item()),
+            int(env.food_pos[0, 1].item()),
+        )
+        length = int(env.snake_length[0].item())
+        term_reason = int(env.termination_reason[0].item())
         status = "done" if episode_done else "running"
         hud_text = (
-            f"episode {completed_episodes}/{episodes}  score={int(env.score[0].item())}  "
-            f"steps={int(env.steps[0].item())}  state={status}  arrows=move  r=reset"
+            f"episode={completed_episodes}/{episodes} mode={mode} state={status} "
+            f"term={_termination_label(term_reason)}({term_reason})\n"
+            f"steps={int(env.steps[0].item())}/{max_steps} score={int(env.score[0].item())} "
+            f"length={length} reward={last_reward:.3f} ep_reward={episode_reward:.3f}\n"
+            f"action={last_action} head={head_pos} food={food_pos} arrows=move r=reset"
         )
         _draw_obs_frame(
             screen=screen,
