@@ -31,5 +31,5 @@ VITE_SNAKE_API_URL=http://127.0.0.1:9000 npm run dev
 
 ## Backend API
 ```bash
-SNAKE_REPLAY_DIR=recordings/snake SNAKE_RENDER_HOST=127.0.0.1 SNAKE_RENDER_PORT=8770 python -m server.snake.render
+SNAKE_REPLAY_DIR=recordings/snake SIMVERSE_API_HOST=127.0.0.1 SIMVERSE_API_PORT=8770 python -m server.main
 ```

@@ -30,7 +30,7 @@ class SnakeReplayAPIServer:
 
     def start(self) -> None:
         os.environ["SNAKE_REPLAY_DIR"] = self.replay_dir
-        uvicorn.run("server.snake.render:app", host=self.host, port=self.port, reload=False)
+        uvicorn.run("server.main:app", host=self.host, port=self.port, reload=False)
 
     def stop(self) -> None:
         return

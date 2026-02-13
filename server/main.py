@@ -2,6 +2,19 @@ from __future__ import annotations
 
 import os
 
+from fastapi import FastAPI
+
+from server.snake.router import router as snake_router
+
+app = FastAPI(title="Simverse API")
+app.include_router(snake_router)
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"service": "simverse-api", "status": "ok"}
+
+
 if __name__ == "__main__":
     import uvicorn
 

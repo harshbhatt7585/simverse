@@ -2,10 +2,16 @@
 
 Server-side modules used by the frontend live/replay UIs live here.
 
-Current module:
-- `server/snake/render.py` - FastAPI server with:
-  - `GET /`
-  - `GET /snapshot`
-  - `GET /events`
-  - `GET /replays` and `GET /snake/replays`
-  - `GET /replays/{replay_id}` and `GET /snake/replays/{replay_id}`
+Single server entrypoint:
+- `server/main.py` - central FastAPI app.
+
+Routers:
+- `server/snake/router.py` - snake endpoints mounted under `/snake`:
+  - `GET /snake/`
+  - `GET /snake/snapshot`
+  - `GET /snake/events`
+  - `GET /snake/replays`
+  - `GET /snake/replays/{replay_id}`
+
+Compatibility:
+- `server/snake/render.py` forwards to `server.main`.
