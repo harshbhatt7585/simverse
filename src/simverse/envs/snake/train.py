@@ -51,10 +51,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=200, help="Training episodes")
     parser.add_argument("--max-steps", type=int, default=300, help="Max steps per episode")
     parser.add_argument("--init-length", type=int, default=3, help="Initial snake length")
-    parser.add_argument("--food-reward", type=float, default=1.0)
+    parser.add_argument("--food-reward", type=float, default=5.0)
     parser.add_argument("--crash-penalty", type=float, default=1.0)
     parser.add_argument("--distance-reward-scale", type=float, default=0.01)
-    parser.add_argument("--survival-bonus", type=float, default=0.0)
+    parser.add_argument("--survival-bonus", type=float, default=1.0)
     parser.add_argument("--survival-bonus-every", type=int, default=10)
     parser.add_argument("--training-epochs", type=int, default=3)
     parser.add_argument("--auto-reset-done-envs", choices=["on", "off"], default="on")
@@ -72,10 +72,10 @@ def train(
     episodes: int = 200,
     max_steps: int = 300,
     init_length: int = 3,
-    food_reward: float = 1.0,
+    food_reward: float = 5.0,
     crash_penalty: float = 1.0,
     distance_reward_scale: float = 0.01,
-    survival_bonus: float = 0.0,
+    survival_bonus: float = 1.0,
     survival_bonus_every: int = 10,
     training_epochs: int = 3,
     auto_reset_done_envs: bool = True,
