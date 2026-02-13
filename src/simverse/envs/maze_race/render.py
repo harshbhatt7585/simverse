@@ -17,6 +17,7 @@ import torch
 
 from simverse.envs.maze_race.config import MazeRaceConfig
 from simverse.envs.maze_race.torch_env import MazeRaceTorchEnv
+from simverse.render_cli import build_render_parser
 
 
 class MazeRaceRenderer:
@@ -363,37 +364,22 @@ class MazeRaceReplayRenderer:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render MazeRaceTorchEnv")
-    parser.add_argument("--size", type=int, default=15, help="Maze width/height (square)")
-    parser.add_argument("--cell", type=int, default=36, help="Cell size in pixels")
-    parser.add_argument("--fps", type=int, default=20, help="Render FPS")
-    parser.add_argument("--replay", type=str, default=None, help="Path to a replay JSON file")
-    parser.add_argument(
-        "--replay-dir",
-        type=str,
-        default=None,
-        help="Directory containing replay JSON files",
+    parser = build_render_parser(
+        "Render MazeRaceTorchEnv",
+        [
+            ("size", {"default": 15, "help": "Maze width/height (square)"}),
+            ("cell", {"default": 36, "help": "Cell size in pixels"}),
+            ("fps", {"default": 20, "help": "Render FPS"}),
+            ("replay", {"help": "Path to a replay JSON file"}),
+            ("replay_dir", {"help": "Directory containing replay JSON files"}),
+            ("loop", {"help": "Loop replay"}),
+            ("watch", {"help": "Watch replay directory for new episodes"}),
+            ("poll", {"help": "Replay dir poll interval"}),
+            "manual_flag",
+            "no_auto_reset_flag",
+        ],
+        defaults={"auto": True, "auto_reset": True},
     )
-    parser.add_argument("--loop", action="store_true", help="Loop replay")
-    parser.add_argument(
-        "--watch",
-        action="store_true",
-        help="Watch replay directory for new episodes",
-    )
-    parser.add_argument("--poll", type=float, default=1.0, help="Replay dir poll interval")
-    parser.add_argument(
-        "--manual",
-        dest="auto",
-        action="store_false",
-        help="Disable auto-run and use keyboard controls",
-    )
-    parser.add_argument(
-        "--no-auto-reset",
-        dest="auto_reset",
-        action="store_false",
-        help="Stop after an episode ends",
-    )
-    parser.set_defaults(auto=True, auto_reset=True)
     return parser.parse_args()
 
 

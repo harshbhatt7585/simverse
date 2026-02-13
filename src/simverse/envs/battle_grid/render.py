@@ -15,6 +15,7 @@ import torch
 from simverse.envs.battle_grid.config import BattleGridConfig
 from simverse.envs.battle_grid.torch_env import BattleGridTorchEnv
 from simverse.policies.simple import SimplePolicy
+from simverse.render_cli import build_render_parser
 
 
 def _load_policies_from_checkpoint(
@@ -98,19 +99,23 @@ def _manual_actions(keys, env: BattleGridTorchEnv) -> list[int]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render Battle Grid environment")
-    parser.add_argument("--width", type=int, default=13)
-    parser.add_argument("--height", type=int, default=13)
-    parser.add_argument("--max-steps", type=int, default=200)
-    parser.add_argument("--max-health", type=int, default=3)
-    parser.add_argument("--attack-range", type=int, default=1)
-    parser.add_argument("--episodes", type=int, default=5)
-    parser.add_argument("--cell-size", type=int, default=36)
-    parser.add_argument("--fps", type=int, default=18)
-    parser.add_argument("--mode", choices=["manual", "random", "policy"], default="manual")
-    parser.add_argument("--checkpoint", type=str, default=None)
-    parser.add_argument("--auto-reset", choices=["on", "off"], default="on")
-    parser.add_argument("--seed", type=int, default=None)
+    parser = build_render_parser(
+        "Render Battle Grid environment",
+        [
+            ("width", {"default": 13}),
+            ("height", {"default": 13}),
+            ("max_steps", {"default": 200}),
+            ("max_health", {"default": 3}),
+            ("attack_range", {"default": 1}),
+            ("episodes", {"default": 5}),
+            ("cell_size", {"default": 36}),
+            ("fps", {"default": 18}),
+            "mode",
+            "checkpoint",
+            "auto_reset",
+            "seed",
+        ],
+    )
     return parser.parse_args()
 
 

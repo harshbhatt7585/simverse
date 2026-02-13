@@ -19,6 +19,7 @@ import pygame
 
 from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.env import FarmtilaEnv
+from simverse.render_cli import build_render_parser
 
 
 @dataclass
@@ -1286,23 +1287,27 @@ class FarmtilaRender:
         return best_seed
 
 
+def parse_args() -> argparse.Namespace:
+    parser = build_render_parser(
+        "Farmtila renderer",
+        [
+            ("width", {"default": 30, "help": "Grid width"}),
+            ("height", {"default": 20, "help": "Grid height"}),
+            ("num_agents", {"default": 2, "help": "Number of agents"}),
+            ("cell_size", {"default": 32, "help": "Cell size in pixels"}),
+            ("fps", {"default": 30, "help": "Frames per second"}),
+            ("max_frames", {"default": int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))}),
+            ("max_episodes", {"default": int(os.environ.get("FARMTILA_MAX_EPISODES", "0"))}),
+            ("replay", {"help": "Path to a replay JSON file"}),
+            ("replay_dir", {"help": "Directory containing replay JSON files"}),
+            ("loop", {"help": "Loop replay when it finishes"}),
+        ],
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Farmtila renderer")
-    parser.add_argument("--width", type=int, default=30, help="Grid width")
-    parser.add_argument("--height", type=int, default=20, help="Grid height")
-    parser.add_argument("--num-agents", type=int, default=2, help="Number of agents")
-    parser.add_argument("--cell-size", type=int, default=32, help="Cell size in pixels")
-    parser.add_argument("--fps", type=int, default=30, help="Frames per second")
-    parser.add_argument(
-        "--max-frames", type=int, default=int(os.environ.get("FARMTILA_MAX_FRAMES", "0"))
-    )
-    parser.add_argument(
-        "--max-episodes", type=int, default=int(os.environ.get("FARMTILA_MAX_EPISODES", "0"))
-    )
-    parser.add_argument("--replay", type=str, help="Path to a replay JSON file", default=None)
-    parser.add_argument("--replay-dir", type=str, help="Directory containing replay JSON files")
-    parser.add_argument("--loop", action="store_true", help="Loop replay when it finishes")
-    args = parser.parse_args()
+    args = parse_args()
 
     if args.replay_dir:
         replay_dir = Path(args.replay_dir)

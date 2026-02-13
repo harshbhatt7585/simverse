@@ -17,6 +17,7 @@ import torch.nn as nn
 
 from simverse.abstractor.policy import Policy
 from simverse.envs.gym_env.torch_env import observation_batch_to_chw
+from simverse.render_cli import build_render_parser
 
 
 class GymMLPPolicy(Policy):
@@ -80,19 +81,19 @@ def _policy_action(policy: torch.nn.Module, obs: np.ndarray, device: str) -> int
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render Gym env episodes with optional recording")
-    parser.add_argument("--env-id", type=str, default="CartPole-v1", help="Gymnasium env id")
-    parser.add_argument("--episodes", type=int, default=3, help="Episodes to run")
-    parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
-    parser.add_argument(
-        "--fps", type=int, default=30, help="Frame rate target when using human render"
+    parser = build_render_parser(
+        "Render Gym env episodes with optional recording",
+        [
+            ("env_id", {"help": "Gymnasium env id"}),
+            ("episodes", {"default": 3, "help": "Episodes to run"}),
+            ("max_steps", {"default": 500, "help": "Max steps per episode"}),
+            ("fps", {"default": 30, "help": "Frame rate target when using human render"}),
+            ("checkpoint", {"help": "Checkpoint path to load policy"}),
+            "record",
+            "record_dir",
+            "seed",
+        ],
     )
-    parser.add_argument(
-        "--checkpoint", type=str, default=None, help="Checkpoint path to load policy"
-    )
-    parser.add_argument("--record", choices=["on", "off"], default="off")
-    parser.add_argument("--record-dir", type=str, default="recordings/gym_env/videos")
-    parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
 

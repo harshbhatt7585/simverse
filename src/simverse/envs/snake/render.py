@@ -18,6 +18,7 @@ import torch
 from simverse.envs.snake.config import SnakeConfig
 from simverse.envs.snake.torch_env import SnakeTorchEnv
 from simverse.policies.simple import SimplePolicy
+from simverse.render_cli import build_render_parser
 
 HUD_HEIGHT = 54
 COLORS = {
@@ -267,28 +268,27 @@ def _render_replay(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Render Snake environment")
-    parser.add_argument("--width", type=int, default=15)
-    parser.add_argument("--height", type=int, default=15)
-    parser.add_argument("--max-steps", type=int, default=500)
-    parser.add_argument("--init-length", type=int, default=3)
-    parser.add_argument("--episodes", type=int, default=3)
-    parser.add_argument("--cell-size", type=int, default=30)
-    parser.add_argument("--fps", type=int, default=18)
-    parser.add_argument("--mode", choices=["manual", "random", "policy"], default="manual")
-    parser.add_argument("--checkpoint", type=str, default=None)
-    parser.add_argument("--auto-reset", choices=["on", "off"], default="on")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--replay", type=str, default=None, help="Path to a replay JSON file")
-    parser.add_argument(
-        "--replay-dir",
-        type=str,
-        default=None,
-        help="Directory containing replay JSON files",
+    parser = build_render_parser(
+        "Render Snake environment",
+        [
+            ("width", {"default": 15}),
+            ("height", {"default": 15}),
+            ("max_steps", {"default": 500}),
+            ("init_length", {"default": 3}),
+            ("episodes", {"default": 3}),
+            ("cell_size", {"default": 30}),
+            ("fps", {"default": 18}),
+            "mode",
+            "checkpoint",
+            "auto_reset",
+            "seed",
+            ("replay", {"help": "Path to a replay JSON file"}),
+            ("replay_dir", {"help": "Directory containing replay JSON files"}),
+            ("loop", {"help": "Loop replay playback"}),
+            ("watch", {"help": "Watch replay dir for new files"}),
+            ("poll", {"help": "Replay dir poll interval"}),
+        ],
     )
-    parser.add_argument("--loop", action="store_true", help="Loop replay playback")
-    parser.add_argument("--watch", action="store_true", help="Watch replay dir for new files")
-    parser.add_argument("--poll", type=float, default=1.0, help="Replay dir poll interval")
     return parser.parse_args()
 
 
