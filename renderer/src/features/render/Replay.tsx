@@ -30,6 +30,10 @@ function Replay({ baseUrl }: ReplayProps) {
     }
     return episodes.find((episode) => episode.id === selectedReplayId)?.name ?? ''
   }, [episodes, selectedReplay, selectedReplayId])
+  const selectedReplayIndex = useMemo(
+    () => episodes.findIndex((episode) => episode.id === selectedReplayId),
+    [episodes, selectedReplayId],
+  )
 
   const frames = Array.isArray(selectedReplay?.data?.frames) ? selectedReplay.data.frames : []
   const currentFrame: GenericFrame | null =
@@ -69,18 +73,19 @@ function Replay({ baseUrl }: ReplayProps) {
           return
         }
 
-        const nextSelectedId = nextEpisodes.some((episode) => episode.id === selectedReplayId)
-          ? selectedReplayId
-          : nextEpisodes[0].id
-        setSelectedReplayId(nextSelectedId)
-        setFrameIndex(0)
+        setSelectedReplayId((currentId) => {
+          if (nextEpisodes.some((episode) => episode.id === currentId)) {
+            return currentId
+          }
+          return nextEpisodes[0].id
+        })
         setStatus(`Loaded ${nextEpisodes.length} replay files.`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
       }
     })()
-  }, [baseUrl, refreshToken, selectedReplayId])
+  }, [baseUrl, refreshToken])
 
   useEffect(() => {
     if (!selectedReplayId) {
@@ -106,13 +111,26 @@ function Replay({ baseUrl }: ReplayProps) {
 
         setSelectedReplay(payload)
         setFrameIndex(0)
-        setPlaying(false)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
       }
     })()
   }, [baseUrl, selectedReplayId])
+
+  const selectEpisodeByOffset = (offset: number, autoPlay = false) => {
+    if (episodes.length === 0 || selectedReplayIndex < 0) {
+      return
+    }
+    const nextIndex = Math.max(0, Math.min(episodes.length - 1, selectedReplayIndex + offset))
+    const nextEpisode = episodes[nextIndex]
+    if (!nextEpisode) {
+      return
+    }
+    setSelectedReplayId(nextEpisode.id)
+    setFrameIndex(0)
+    setPlaying(autoPlay)
+  }
 
   useEffect(() => {
     if (frameIndex >= frames.length) {
@@ -202,9 +220,9 @@ function Replay({ baseUrl }: ReplayProps) {
         <div className="control-row compact">
           <button
             type="button"
-            disabled={frames.length === 0}
+            disabled={episodes.length === 0}
             onClick={() => {
-              setFrameIndex((value) => Math.max(0, value - 1))
+              selectEpisodeByOffset(-1, false)
             }}
           >
             Prev
@@ -220,9 +238,9 @@ function Replay({ baseUrl }: ReplayProps) {
           </button>
           <button
             type="button"
-            disabled={frames.length === 0}
+            disabled={episodes.length === 0}
             onClick={() => {
-              setFrameIndex((value) => Math.min(frames.length - 1, value + 1))
+              selectEpisodeByOffset(1, true)
             }}
           >
             Next
