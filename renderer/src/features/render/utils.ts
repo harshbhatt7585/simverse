@@ -1,13 +1,3 @@
-export const SNAKE_COLORS = {
-  bg: '#0e141b',
-  floor: '#eef3f8',
-  wall: '#3c4e62',
-  food: '#d93f47',
-  head: '#23924c',
-  body: '#5acb85',
-  grid: 'rgba(0,0,0,0.08)',
-} as const
-
 export function firstScalar(value: unknown, fallback = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
