@@ -1,15 +1,13 @@
 # Simverse Renderer (React)
 
-This app is the frontend for Simverse live rendering and replay playback.
+This app is the frontend for Simverse snake replay playback.
 
 ## Modes
-- `Snake Live / Web Render`
-  - Uses backend SSE endpoint: `/events`
-  - Supports replay snapshots from `/snapshot` when running `simverse.envs.snake.web_render`
-- `Maze Race Live`
-  - Uses backend SSE endpoint: `/events`
-- `Battle Grid Replay Web`
-  - Uses `/api/episodes` and `/api/episode?name=...`
+- `Live`
+  - Placeholder only for now.
+- `Replay`
+  - Fetches all replay files from `/snake/replays/`.
+  - Uses `SnakeRenderer` to display frames.
 
 ## Run
 ```bash
@@ -20,26 +18,18 @@ npm run dev
 Open `http://localhost:5173/render`.
 
 ## Dev Proxy Defaults
-Vite proxies these local paths to your backend services:
-- `/snake-web` -> `http://127.0.0.1:8766`
-- `/snake-live` -> `http://127.0.0.1:8766`
-- `/maze-live` -> `http://127.0.0.1:8765`
-- `/battle-replay` -> `http://127.0.0.1:8866`
+Vite proxies:
+- `/snake` -> `http://127.0.0.1:8770`
 
-Override targets with env vars if needed:
-- `VITE_SNAKE_WEB_URL`
-- `VITE_SNAKE_LIVE_URL`
-- `VITE_MAZE_LIVE_URL`
-- `VITE_BATTLE_REPLAY_URL`
+Override target with:
+- `VITE_SNAKE_API_URL`
 
 Example:
 ```bash
-VITE_SNAKE_WEB_URL=http://127.0.0.1:9000 npm run dev
+VITE_SNAKE_API_URL=http://127.0.0.1:9000 npm run dev
 ```
 
-## Backend examples
+## Backend API
 ```bash
-python -m simverse.envs.snake.web_render --replay-dir recordings/snake --host 127.0.0.1 --port 8766
-python -m simverse.envs.maze_race.train --render-server on --render-port 8765
-python -m simverse.envs.battle_grid.replay_web --replay-dir recordings/battle_grid --host 127.0.0.1 --port 8866
+python -m simverse.envs.snake.replays_api --replay-dir recordings/snake --host 127.0.0.1 --port 8770
 ```

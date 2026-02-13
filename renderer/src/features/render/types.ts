@@ -1,23 +1,4 @@
-export type ViewMode = 'snake' | 'maze' | 'battle'
-
-export type Position = { x: number; y: number }
-
-export type MetaPayload = {
-  title?: string
-  env?: string
-  width?: number
-  height?: number
-  channels?: number
-  replay_files?: string[]
-  replay_count?: number
-  snapshot_url?: string
-  fps?: number
-}
-
-export type EventPayload = {
-  type?: string
-  data?: unknown
-}
+export type ViewMode = 'live' | 'replay'
 
 export type GenericFrame = {
   step?: number
@@ -26,22 +7,20 @@ export type GenericFrame = {
   rewards?: unknown
   info?: Record<string, unknown>
   done?: boolean
-  _replay_file_index?: unknown
-  _replay_file_name?: unknown
 }
 
-export type EpisodePayload = {
-  metadata?: Record<string, unknown>
+export type SnakeReplayFile = {
+  episode?: number
+  steps?: number
   frames?: GenericFrame[]
+  [key: string]: unknown
 }
 
-export type BattleReward = {
-  0: number
-  1: number
+export type SnakeReplayEpisode = {
+  name: string
+  data: SnakeReplayFile
 }
 
-export type BattleDims = {
-  width: number
-  height: number
-  cell: number
+export type SnakeReplaysResponse = {
+  episodes: SnakeReplayEpisode[]
 }

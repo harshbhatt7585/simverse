@@ -1,15 +1,12 @@
 import { useState } from 'react'
 
 import type { ViewMode } from '../features/render/types'
-import BattleViewer from '../features/render/viewers/BattleViewer'
-import MazeViewer from '../features/render/viewers/MazeViewer'
-import SnakeViewer from '../features/render/viewers/SnakeViewer'
+import Live from '../features/render/Live'
+import Replay from '../features/render/Replay'
 
 function RenderPage() {
-  const [mode, setMode] = useState<ViewMode>('snake')
-  const [snakeUrl, setSnakeUrl] = useState('/snake-web')
-  const [mazeUrl, setMazeUrl] = useState('/maze-live')
-  const [battleUrl, setBattleUrl] = useState('/battle-replay')
+  const [mode, setMode] = useState<ViewMode>('replay')
+  const [replayApiUrl, setReplayApiUrl] = useState('/snake')
 
   return (
     <main className="app-shell">
@@ -28,49 +25,27 @@ function RenderPage() {
               setMode(event.target.value as ViewMode)
             }}
           >
-            <option value="snake">Snake Live / Web Render</option>
-            <option value="maze">Maze Race Live</option>
-            <option value="battle">Battle Grid Replay Web</option>
+            <option value="live">Live</option>
+            <option value="replay">Replay</option>
           </select>
 
-          {mode === 'snake' ? (
+          {mode === 'replay' ? (
             <input
-              value={snakeUrl}
+              value={replayApiUrl}
               onChange={(event) => {
-                setSnakeUrl(event.target.value)
+                setReplayApiUrl(event.target.value)
               }}
-              placeholder="Snake backend base URL"
-            />
-          ) : null}
-
-          {mode === 'maze' ? (
-            <input
-              value={mazeUrl}
-              onChange={(event) => {
-                setMazeUrl(event.target.value)
-              }}
-              placeholder="Maze backend base URL"
-            />
-          ) : null}
-
-          {mode === 'battle' ? (
-            <input
-              value={battleUrl}
-              onChange={(event) => {
-                setBattleUrl(event.target.value)
-              }}
-              placeholder="Battle backend base URL"
+              placeholder="Replay API base URL (example: /snake)"
             />
           ) : null}
         </div>
       </header>
 
-      {mode === 'snake' ? <SnakeViewer baseUrl={snakeUrl} /> : null}
-      {mode === 'maze' ? <MazeViewer baseUrl={mazeUrl} /> : null}
-      {mode === 'battle' ? <BattleViewer baseUrl={battleUrl} /> : null}
+      {mode === 'live' ? <Live /> : null}
+      {mode === 'replay' ? <Replay baseUrl={replayApiUrl} /> : null}
 
       <footer className="footnote">
-        <p>Defaults are Vite proxy paths. Use absolute URLs if your backend serves CORS headers.</p>
+        <p>Replay fetches from {`/snake/replays/`} under the provided base URL.</p>
       </footer>
     </main>
   )
