@@ -17,6 +17,8 @@ cd renderer
 npm run dev
 ```
 
+Open `http://localhost:5173/render`.
+
 ## Dev Proxy Defaults
 Vite proxies these local paths to your backend services:
 - `/snake-web` -> `http://127.0.0.1:8766`
