@@ -149,6 +149,11 @@ function Replay({ baseUrl }: ReplayProps) {
       setFrameIndex((current) => {
         const next = current + 1
         if (next >= frames.length) {
+          const nextEpisode = episodes[selectedReplayIndex + 1]
+          if (nextEpisode) {
+            setSelectedReplayId(nextEpisode.id)
+            return 0
+          }
           setPlaying(false)
           return Math.max(frames.length - 1, 0)
         }
@@ -159,7 +164,7 @@ function Replay({ baseUrl }: ReplayProps) {
     return () => {
       window.clearInterval(timer)
     }
-  }, [frames.length, playing, speed])
+  }, [episodes, frames.length, playing, selectedReplayIndex, speed])
 
   useEffect(() => {
     if (!currentFrame) {
