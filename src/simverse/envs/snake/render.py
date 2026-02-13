@@ -194,6 +194,11 @@ def _extract_reward_value(rewards) -> float:
     if rewards is None:
         return 0.0
     if isinstance(rewards, dict):
+        if "reward" in rewards:
+            try:
+                return float(rewards["reward"])
+            except (TypeError, ValueError):
+                return 0.0
         if not rewards:
             return 0.0
         rewards = next(iter(rewards.values()))
@@ -204,7 +209,24 @@ def _extract_reward_value(rewards) -> float:
     elif isinstance(rewards, (list, tuple)):
         if not rewards:
             return 0.0
-        rewards = rewards[0]
+        first = rewards[0]
+        if isinstance(first, dict):
+            total = 0.0
+            found = False
+            for item in rewards:
+                if not isinstance(item, dict):
+                    continue
+                value = item.get("reward")
+                if value is None:
+                    continue
+                try:
+                    total += float(value)
+                    found = True
+                except (TypeError, ValueError):
+                    continue
+            if found:
+                return total
+        rewards = first
     try:
         return float(rewards)
     except (TypeError, ValueError):
@@ -285,6 +307,8 @@ def _render_replay(
         if not isinstance(frames, list) or not frames:
             return True
 
+        replay_episode_reward = 0.0
+        prev_episode: int | None = None
         for frame in frames:
             if not _handle_events():
                 return False
@@ -312,6 +336,10 @@ def _render_replay(
             length = max(length, inferred_length)
             term_reason = _extract_scalar_int(info.get("termination_reason"), default=0)
             reward = _extract_reward_value(frame.get("rewards"))
+            if prev_episode is None or episode != prev_episode:
+                replay_episode_reward = 0.0
+                prev_episode = episode
+            replay_episode_reward += reward
             done = bool(frame.get("done", False))
             status = "done" if done else "running"
             head_pos = info.get("head_pos")
@@ -329,6 +357,7 @@ def _render_replay(
                 ("Termination", f"{_termination_label(term_reason)} ({term_reason})"),
                 ("Length", str(length)),
                 ("Reward", f"{reward:.3f}"),
+                ("Ep Reward", f"{replay_episode_reward:.3f}"),
                 ("Head", str(head_pos)),
                 ("Food", str(food_pos)),
                 ("FPS", str(max(1, int(fps)))),
