@@ -211,6 +211,24 @@ def _extract_reward_value(rewards) -> float:
         return 0.0
 
 
+def _infer_length_from_obs(obs: np.ndarray) -> int:
+    if obs.ndim != 3 or obs.shape[0] < 4:
+        return 0
+    head_count = int(np.sum(obs[2] > 0.5))
+    body_count = int(np.sum(obs[3] > 0.5))
+    return head_count + body_count
+
+
+def _infer_pos_from_obs(layer: np.ndarray) -> tuple[int, int] | None:
+    if layer.ndim != 2:
+        return None
+    coords = np.argwhere(layer > 0.5)
+    if coords.size == 0:
+        return None
+    y, x = coords[0]
+    return (int(x), int(y))
+
+
 def _render_replay(
     *,
     replay: str | None,
@@ -287,13 +305,22 @@ def _render_replay(
             step = _extract_scalar_int(frame.get("step"), default=0)
             episode = _extract_scalar_int(frame.get("episode"), default=0)
             score = _extract_scalar_int(info.get("score"), default=0)
-            length = _extract_scalar_int(info.get("snake_length"), default=0)
+            inferred_length = _infer_length_from_obs(obs)
+            length = _extract_scalar_int(
+                info.get("snake_length", info.get("slength")),
+                default=inferred_length,
+            )
+            length = max(length, inferred_length)
             term_reason = _extract_scalar_int(info.get("termination_reason"), default=0)
             reward = _extract_reward_value(frame.get("rewards"))
             done = bool(frame.get("done", False))
             status = "done" if done else "running"
-            head_pos = info.get("head_pos", None)
-            food_pos = info.get("food_pos", None)
+            head_pos = info.get("head_pos")
+            if head_pos is None:
+                head_pos = _infer_pos_from_obs(obs[2])
+            food_pos = info.get("food_pos")
+            if food_pos is None:
+                food_pos = _infer_pos_from_obs(obs[1])
 
             metrics = [
                 ("Replay", path.name),

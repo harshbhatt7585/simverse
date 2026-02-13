@@ -221,6 +221,10 @@ class SnakeTorchEnv(SimTorchEnv):
             info = {
                 "steps": self.steps.clone(),
                 "score": self.score.clone(),
+                "snake_length": self.snake_length.clone(),
+                "slength": self.snake_length.clone(),
+                "head_pos": self.snake_segments[:, 0, :].clone(),
+                "food_pos": self.food_pos.clone(),
                 "termination_reason": self.termination_reason.clone(),
             }
             return obs, rewards, self.done.clone(), info
@@ -328,6 +332,10 @@ class SnakeTorchEnv(SimTorchEnv):
         info = {
             "steps": self.steps.clone(),
             "score": self.score.clone(),
+            "snake_length": self.snake_length.clone(),
+            "slength": self.snake_length.clone(),
+            "head_pos": self.snake_segments[:, 0, :].clone(),
+            "food_pos": self.food_pos.clone(),
             "termination_reason": self.termination_reason.clone(),
             "distance_to_food": new_dist.clone(),
         }
