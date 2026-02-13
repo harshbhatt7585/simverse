@@ -21,6 +21,7 @@ from simverse.envs.farmtila.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
@@ -111,7 +112,7 @@ def train(use_wandb: bool = True):
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
         config=training_config,
-        project_name="simverse-farmtila",
+        project_name=DEFAULT_WANDB_PROJECT,
         run_name="ppo-training-vectorized-env",
         episode_save_dir="recordings/farmtila",
         device=training_config["device"],

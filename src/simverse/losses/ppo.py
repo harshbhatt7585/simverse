@@ -12,6 +12,7 @@ from simverse.abstractor.trainer import Trainer
 from simverse.agent.stats import TrainingStats
 from simverse.logging_config import get_logger, training_logger
 from simverse.utils.replay_buffer import Experience, ReplayBuffer
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 try:
     import wandb
@@ -40,7 +41,7 @@ class PPOTrainer(Trainer):
         gae_lambda: float = 0.95,
         stats: Optional[TrainingStats] = None,
         config: Optional[Dict[str, Any]] = None,
-        project_name: str = "simverse",
+        project_name: str = DEFAULT_WANDB_PROJECT,
         run_name: str = "ppo-training",
         episode_save_dir: str | None = None,
         frame_sink: Callable[[Dict[str, Any]], None] | None = None,

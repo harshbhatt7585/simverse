@@ -21,6 +21,7 @@ from simverse.envs.battle_grid.torch_env import BattleGridTorchEnv
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: Policy, env: BattleGridTorchEnv) -> BattleGridAgent:
@@ -131,7 +132,7 @@ def train(
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
         config=training_config,
-        project_name="simverse-battle-grid",
+        project_name=DEFAULT_WANDB_PROJECT,
         run_name="ppo-battle-grid",
         episode_save_dir="recordings/battle_grid",
         device=training_config["device"],

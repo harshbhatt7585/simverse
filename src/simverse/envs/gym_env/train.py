@@ -23,6 +23,7 @@ from simverse.config.policy import PolicySpec
 from simverse.envs.gym_env.torch_env import GymTorchConfig, GymTorchEnv, observation_batch_to_chw
 from simverse.losses.ppo import PPOTrainer
 from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 class GymMLPPolicy(Policy):
@@ -288,7 +289,7 @@ def train(
         "torch_fastpath": True,
     }
 
-    resolved_project_name = "simverse-gym"
+    resolved_project_name = DEFAULT_WANDB_PROJECT
     resolved_run_name = (
         f"{env_id.replace('/', '_').lower()}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )

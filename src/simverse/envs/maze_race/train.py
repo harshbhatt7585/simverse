@@ -23,6 +23,7 @@ from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: Policy, env: MazeRaceTorchEnv) -> MazeRaceAgent:
@@ -158,7 +159,7 @@ def train(
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
         config=training_config,
-        project_name="simverse-maze-race",
+        project_name=DEFAULT_WANDB_PROJECT,
         run_name="ppo-maze-race",
         episode_save_dir="recordings/maze_race",
         frame_sink=frame_sink,

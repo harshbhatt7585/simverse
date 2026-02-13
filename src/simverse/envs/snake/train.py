@@ -22,6 +22,7 @@ from simverse.envs.snake.torch_env import SnakeTorchEnv
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def _resolve_device() -> str:
@@ -174,7 +175,7 @@ def train(
         gae_lambda=training_config["gae_lambda"],
         stats=stats,
         config=training_config,
-        project_name="simverse-snake",
+        project_name=DEFAULT_WANDB_PROJECT,
         run_name=run_name,
         episode_save_dir="recordings/snake",
         device=training_config["device"],
