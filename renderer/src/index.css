@@ -15,10 +15,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(55, 85, 130, 0.55), transparent 45%),
-    radial-gradient(circle at 92% 15%, rgba(31, 74, 63, 0.45), transparent 38%),
-    #090f16;
+  background: #000;
 }
 
 #root {
