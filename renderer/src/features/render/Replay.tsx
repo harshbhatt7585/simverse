@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import SnakeRenderer from './SnakeRenderer'
-import type { GenericFrame, SnakeReplayEpisode, SnakeReplaysResponse } from './types'
+import type {
+  GenericFrame,
+  SnakeReplayDetail,
+  SnakeReplaySummary,
+  SnakeReplaysResponse,
+} from './types'
 import { firstScalar, parseNumber, parseReward, resolveUrl } from './utils'
 
 type ReplayProps = {
@@ -9,8 +14,9 @@ type ReplayProps = {
 }
 
 function Replay({ baseUrl }: ReplayProps) {
-  const [episodes, setEpisodes] = useState<SnakeReplayEpisode[]>([])
-  const [selectedName, setSelectedName] = useState('')
+  const [episodes, setEpisodes] = useState<SnakeReplaySummary[]>([])
+  const [selectedReplayId, setSelectedReplayId] = useState('')
+  const [selectedReplay, setSelectedReplay] = useState<SnakeReplayDetail | null>(null)
   const [frameIndex, setFrameIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
@@ -18,11 +24,14 @@ function Replay({ baseUrl }: ReplayProps) {
   const [error, setError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
 
-  const selectedEpisode = useMemo(
-    () => episodes.find((episode) => episode.name === selectedName) ?? null,
-    [episodes, selectedName],
-  )
-  const frames = selectedEpisode?.data.frames ?? []
+  const selectedReplayName = useMemo(() => {
+    if (selectedReplay?.name) {
+      return selectedReplay.name
+    }
+    return episodes.find((episode) => episode.id === selectedReplayId)?.name ?? ''
+  }, [episodes, selectedReplay, selectedReplayId])
+
+  const frames = Array.isArray(selectedReplay?.data?.frames) ? selectedReplay.data.frames : []
   const currentFrame: GenericFrame | null =
     frames.length > 0 ? frames[Math.max(0, Math.min(frameIndex, frames.length - 1))] : null
 
@@ -38,18 +47,32 @@ function Replay({ baseUrl }: ReplayProps) {
 
         const payload = (await response.json()) as SnakeReplaysResponse
         const nextEpisodes = Array.isArray(payload.episodes)
-          ? payload.episodes.filter((episode) => episode && typeof episode.name === 'string')
+          ? payload.episodes
+              .map((episode) => {
+                if (!episode || typeof episode.name !== 'string') {
+                  return null
+                }
+                const fallbackId = episode.name.replace(/\.json$/i, '')
+                const id =
+                  typeof episode.id === 'string' && episode.id.length > 0 ? episode.id : fallbackId
+                return { id, name: episode.name } satisfies SnakeReplaySummary
+              })
+              .filter((episode): episode is SnakeReplaySummary => episode !== null)
           : []
 
         setEpisodes(nextEpisodes)
         if (nextEpisodes.length === 0) {
-          setSelectedName('')
+          setSelectedReplayId('')
+          setSelectedReplay(null)
           setFrameIndex(0)
           setStatus('No replay JSON files found.')
           return
         }
 
-        setSelectedName(nextEpisodes[0].name)
+        const nextSelectedId = nextEpisodes.some((episode) => episode.id === selectedReplayId)
+          ? selectedReplayId
+          : nextEpisodes[0].id
+        setSelectedReplayId(nextSelectedId)
         setFrameIndex(0)
         setStatus(`Loaded ${nextEpisodes.length} replay files.`)
       } catch (err) {
@@ -57,7 +80,39 @@ function Replay({ baseUrl }: ReplayProps) {
         setError(message)
       }
     })()
-  }, [baseUrl, refreshToken])
+  }, [baseUrl, refreshToken, selectedReplayId])
+
+  useEffect(() => {
+    if (!selectedReplayId) {
+      setSelectedReplay(null)
+      return
+    }
+
+    void (async () => {
+      setError('')
+      setStatus(`Loading replay ${selectedReplayId}...`)
+      try {
+        const response = await fetch(resolveUrl(baseUrl, `/replays/${encodeURIComponent(selectedReplayId)}`), {
+          cache: 'no-store',
+        })
+        if (!response.ok) {
+          throw new Error(`Unable to load replay ${selectedReplayId} (${response.status})`)
+        }
+
+        const payload = (await response.json()) as SnakeReplayDetail
+        if (!payload || typeof payload.name !== 'string' || typeof payload.id !== 'string') {
+          throw new Error('Invalid replay response format')
+        }
+
+        setSelectedReplay(payload)
+        setFrameIndex(0)
+        setPlaying(false)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setError(message)
+      }
+    })()
+  }, [baseUrl, selectedReplayId])
 
   useEffect(() => {
     if (frameIndex >= frames.length) {
@@ -103,7 +158,7 @@ function Replay({ baseUrl }: ReplayProps) {
 
     setStatus(
       [
-        `file: ${selectedName}`,
+        `file: ${selectedReplayName}`,
         `episode: ${episode}`,
         `frame: ${frameIndex + 1}/${frames.length}`,
         `step: ${currentFrame.step ?? '?'}`,
@@ -114,7 +169,7 @@ function Replay({ baseUrl }: ReplayProps) {
         `steps: ${steps}`,
       ].join('\n'),
     )
-  }, [currentFrame, frameIndex, frames.length, selectedName])
+  }, [currentFrame, frameIndex, frames.length, selectedReplayName])
 
   return (
     <div className="viewer-grid">
@@ -129,16 +184,16 @@ function Replay({ baseUrl }: ReplayProps) {
         </label>
         <select
           id="replay-episode"
-          value={selectedName}
+          value={selectedReplayId}
           onChange={(event) => {
-            setSelectedName(event.target.value)
+            setSelectedReplayId(event.target.value)
             setFrameIndex(0)
             setPlaying(false)
           }}
           disabled={episodes.length === 0}
         >
           {episodes.map((episode) => (
-            <option key={episode.name} value={episode.name}>
+            <option key={episode.id} value={episode.id}>
               {episode.name}
             </option>
           ))}

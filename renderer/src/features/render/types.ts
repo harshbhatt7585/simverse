@@ -16,11 +16,17 @@ export type SnakeReplayFile = {
   [key: string]: unknown
 }
 
-export type SnakeReplayEpisode = {
+export type SnakeReplaySummary = {
+  id: string
   name: string
-  data: SnakeReplayFile
 }
 
 export type SnakeReplaysResponse = {
-  episodes: SnakeReplayEpisode[]
+  episodes: SnakeReplaySummary[]
+}
+
+export type SnakeReplayDetail = {
+  id: string
+  name: string
+  data: SnakeReplayFile
 }

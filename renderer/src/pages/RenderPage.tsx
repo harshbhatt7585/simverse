@@ -45,7 +45,7 @@ function RenderPage() {
       {mode === 'replay' ? <Replay baseUrl={replayApiUrl} /> : null}
 
       <footer className="footnote">
-        <p>Replay fetches from {`/snake/replays/`} under the provided base URL.</p>
+        <p>Replay uses {`/replays`} and {`/replays/{id}`} under the provided base URL.</p>
       </footer>
     </main>
   )
