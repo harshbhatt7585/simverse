@@ -14,4 +14,4 @@ Routers:
   - `GET /snake/replays/{replay_id}`
 
 Compatibility:
-- `server/snake/render.py` forwards to `server.main`.
+- Use `server/main.py` as the single server entrypoint.

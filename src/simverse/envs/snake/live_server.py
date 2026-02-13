@@ -7,7 +7,7 @@ class LiveRenderServer:
     """
     Minimal compatibility server.
 
-    The FastAPI backend lives in `server/snake/render.py`; this class keeps
+    The FastAPI backend lives in `server/main.py`; this class keeps
     older training imports working without requiring the old HTTP/SSE server.
     """
 
