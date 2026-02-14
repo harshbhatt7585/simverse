@@ -74,7 +74,6 @@ def train(
         num_agents=1,
         num_envs=max(1, int(num_envs)),
         max_steps=200,
-        step_penalty=0.01,
         win_reward=1.0,
         lose_penalty=1.0,
         draw_reward=0.0,

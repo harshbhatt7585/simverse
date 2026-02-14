@@ -144,7 +144,6 @@ class MazeRaceTorchEnv(SimTorchEnv):
             self.agent_pos[:, agent_id, 0] = torch.where(can_move, nx, px)
             self.agent_pos[:, agent_id, 1] = torch.where(can_move, ny, py)
 
-        rewards[active, :] -= float(self.config.step_penalty)
         self.steps[active] += 1
 
         reached: list[torch.Tensor] = []
