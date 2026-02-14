@@ -1,22 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import SnakeRenderer from './SnakeRenderer'
+import GameRenderer from './GameRenderer'
 import type {
   GenericFrame,
-  SnakeReplayDetail,
-  SnakeReplaySummary,
-  SnakeReplaysResponse,
+  RenderGame,
+  ReplayDetail,
+  ReplaySummary,
+  ReplaysResponse,
 } from './types'
 import { firstScalar, parseNumber, parseReward, resolveUrl } from './utils'
 
 type ReplayProps = {
+  game: RenderGame
+  onGameChange: (game: RenderGame) => void
   baseUrl: string
 }
 
-function Replay({ baseUrl }: ReplayProps) {
-  const [episodes, setEpisodes] = useState<SnakeReplaySummary[]>([])
+function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
+  const [episodes, setEpisodes] = useState<ReplaySummary[]>([])
   const [selectedReplayId, setSelectedReplayId] = useState('')
-  const [selectedReplay, setSelectedReplay] = useState<SnakeReplayDetail | null>(null)
+  const [selectedReplay, setSelectedReplay] = useState<ReplayDetail | null>(null)
   const [frameIndex, setFrameIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
@@ -49,7 +52,7 @@ function Replay({ baseUrl }: ReplayProps) {
           throw new Error(`Unable to load replays (${response.status})`)
         }
 
-        const payload = (await response.json()) as SnakeReplaysResponse
+        const payload = (await response.json()) as ReplaysResponse
         const nextEpisodes = Array.isArray(payload.episodes)
           ? payload.episodes
               .map((episode) => {
@@ -59,9 +62,9 @@ function Replay({ baseUrl }: ReplayProps) {
                 const fallbackId = episode.name.replace(/\.json$/i, '')
                 const id =
                   typeof episode.id === 'string' && episode.id.length > 0 ? episode.id : fallbackId
-                return { id, name: episode.name } satisfies SnakeReplaySummary
+                return { id, name: episode.name } satisfies ReplaySummary
               })
-              .filter((episode): episode is SnakeReplaySummary => episode !== null)
+              .filter((episode): episode is ReplaySummary => episode !== null)
           : []
 
         setEpisodes(nextEpisodes)
@@ -104,7 +107,7 @@ function Replay({ baseUrl }: ReplayProps) {
           throw new Error(`Unable to load replay ${selectedReplayId} (${response.status})`)
         }
 
-        const payload = (await response.json()) as SnakeReplayDetail
+        const payload = (await response.json()) as ReplayDetail
         if (!payload || typeof payload.name !== 'string' || typeof payload.id !== 'string') {
           throw new Error('Invalid replay response format')
         }
@@ -181,6 +184,7 @@ function Replay({ baseUrl }: ReplayProps) {
 
     setStatus(
       [
+        `game: ${game}`,
         `file: ${selectedReplayName}`,
         `episode: ${episode}`,
         `frame: ${frameIndex + 1}/${frames.length}`,
@@ -192,14 +196,33 @@ function Replay({ baseUrl }: ReplayProps) {
         `steps: ${steps}`,
       ].join('\n'),
     )
-  }, [currentFrame, frameIndex, frames.length, selectedReplayName])
+  }, [currentFrame, frameIndex, frames.length, game, selectedReplayName])
 
   return (
     <div className="viewer-grid">
       <div className="canvas-wrap">
-        <SnakeRenderer frame={currentFrame} />
+        <GameRenderer game={game} frame={currentFrame} />
       </div>
       <aside className="panel">
+        <label className="inline-label" htmlFor="replay-game">
+          Game
+        </label>
+        <select
+          id="replay-game"
+          value={game}
+          onChange={(event) => {
+            onGameChange(event.target.value as RenderGame)
+            setSelectedReplayId('')
+            setSelectedReplay(null)
+            setFrameIndex(0)
+            setPlaying(false)
+            setRefreshToken((value) => value + 1)
+          }}
+        >
+          <option value="snake">Snake</option>
+          <option value="maze">Maze Runner</option>
+        </select>
+
         <label className="inline-label" htmlFor="replay-episode">
           Replay File
         </label>

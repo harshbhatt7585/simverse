@@ -1,4 +1,5 @@
 export type ViewMode = 'live' | 'replay'
+export type RenderGame = 'snake' | 'maze'
 
 export type GenericFrame = {
   step?: number
@@ -9,24 +10,24 @@ export type GenericFrame = {
   done?: boolean
 }
 
-export type SnakeReplayFile = {
+export type ReplayFile = {
   episode?: number
   steps?: number
   frames?: GenericFrame[]
   [key: string]: unknown
 }
 
-export type SnakeReplaySummary = {
+export type ReplaySummary = {
   id: string
   name: string
 }
 
-export type SnakeReplaysResponse = {
-  episodes: SnakeReplaySummary[]
+export type ReplaysResponse = {
+  episodes: ReplaySummary[]
 }
 
-export type SnakeReplayDetail = {
+export type ReplayDetail = {
   id: string
   name: string
-  data: SnakeReplayFile
+  data: ReplayFile
 }

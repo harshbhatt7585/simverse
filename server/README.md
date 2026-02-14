@@ -14,6 +14,14 @@ Routers:
   - `POST /snake/live/frame`
   - `GET /snake/replays`
   - `GET /snake/replays/{replay_id}`
+- `server/maze/router.py` - maze endpoints mounted under `/maze`:
+  - `GET /maze/`
+  - `GET /maze/snapshot`
+  - `GET /maze/events`
+  - `POST /maze/live/meta`
+  - `POST /maze/live/frame`
+  - `GET /maze/replays`
+  - `GET /maze/replays/{replay_id}`
 
 Shared live stream service:
 - `server/live/stream.py` - centralized in-memory live publish/subscribe broker used by routers.
