@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compile", choices=["on", "off"], default="on")
     parser.add_argument("--render-server", choices=["on", "off"], default="on")
     parser.add_argument("--render-host", type=str, default="127.0.0.1")
-    parser.add_argument("--render-port", type=int, default=8765)
+    parser.add_argument("--render-port", type=int, default=8770)
     parser.add_argument("--render-stride", type=int, default=1, help="Stream every Nth frame")
     return parser.parse_args()
 
@@ -56,7 +56,7 @@ def train(
     use_compile: bool = True,
     render_server: bool = True,
     render_host: str = "127.0.0.1",
-    render_port: int = 8765,
+    render_port: int = 8770,
     render_stride: int = 1,
 ) -> None:
     device = "cuda" if torch.cuda.is_available() else "mps"
