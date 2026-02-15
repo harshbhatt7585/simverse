@@ -1,26 +1,159 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0f1116;
+  --foreground: #e8edf5;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: "Trebuchet MS", "Segoe UI", "Noto Sans", sans-serif;
+  --font-mono: "Menlo", "Consolas", "Liberation Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", "Noto Sans", sans-serif;
+}
+
+.landing {
+  min-height: 100vh;
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 40px 24px 56px;
+  display: grid;
+  gap: 22px;
+}
+
+.hero {
+  position: relative;
+  border-radius: 24px;
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at 85% 12%, rgba(255, 188, 93, 0.22), transparent 32%),
+    radial-gradient(circle at 16% 82%, rgba(91, 158, 255, 0.2), transparent 34%),
+    #151b24;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.76rem;
+  color: #c4d7f4;
+}
+
+.hero h1 {
+  margin: 10px 0 0;
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  line-height: 1.03;
+  letter-spacing: 0.02em;
+}
+
+.lead {
+  margin: 14px 0 0;
+  max-width: 700px;
+  color: rgba(232, 237, 245, 0.9);
+  line-height: 1.65;
+}
+
+.hero-actions {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.92rem;
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-primary {
+  background: #335f87;
+  color: #f2f7ff;
+}
+
+.btn-primary:hover {
+  background: #3b6f9e;
+}
+
+.btn-secondary {
+  background: rgba(18, 25, 34, 0.75);
+  color: #dce9fb;
+}
+
+.btn-secondary:hover {
+  background: rgba(29, 42, 57, 0.92);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 22, 31, 0.86);
+  padding: 16px;
+}
+
+.stat-card h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #d3e5ff;
+}
+
+.stat-card p {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: rgba(232, 237, 245, 0.86);
+}
+
+.games {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.game-card {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 17, 25, 0.92);
+  padding: 16px;
+}
+
+.game-card h3 {
+  margin: 0;
+  font-size: 1.04rem;
+}
+
+.game-card p {
+  margin: 8px 0 0;
+  font-family: "Menlo", "Consolas", "Liberation Mono", monospace;
+  font-size: 0.84rem;
+  color: rgba(222, 233, 247, 0.88);
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .games {
+    grid-template-columns: 1fr;
+  }
 }
