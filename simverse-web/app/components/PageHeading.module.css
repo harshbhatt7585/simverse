@@ -4,6 +4,9 @@
   font-weight: 700;
   text-transform: uppercase;
   font-size: clamp(2rem, 6vw, 4.2rem);
-  line-height: 0.98;
-  letter-spacing: 0.03em;
+  line-height: 1.14;
+  letter-spacing: 0.06em;
+  word-spacing: 0.12em;
+  max-width: 20ch;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
 }
