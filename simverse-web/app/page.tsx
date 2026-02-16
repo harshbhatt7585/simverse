@@ -18,7 +18,10 @@ export default function Home() {
       <div className={styles.overlay} />
 
       <main className={styles.main}>
-        <PageHeading text="build RL Environment using Natural Lanaguage" />
+        <PageHeading
+          lineOne="Build RL Environment"
+          lineTwo="Using Natural Language"
+        />
         <PromptInput placeholder="Describe your environment..." />
       </main>
     </div>
