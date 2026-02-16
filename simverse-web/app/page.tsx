@@ -13,10 +13,7 @@ export default function Home() {
         playsInline
         preload="metadata"
       >
-        <source
-          src="https://cdn.coverr.co/videos/coverr-clouds-and-sunset-over-mountains-1579/1080p.mp4"
-          type="video/mp4"
-        />
+        <source src="/videos/48354-453189085.mp4" type="video/mp4" />
       </video>
       <div className={styles.overlay} />
 

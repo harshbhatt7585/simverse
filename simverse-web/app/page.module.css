@@ -1,7 +1,7 @@
 .page {
   position: relative;
   min-height: 100vh;
-  isolation: isolate;
+  overflow: hidden;
 }
 
 .videoBg {
@@ -10,20 +10,22 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  z-index: -2;
+  z-index: 0;
 }
 
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 1;
   background:
     radial-gradient(circle at 50% 35%, rgba(15, 34, 72, 0.22), transparent 48%),
     rgba(6, 12, 24, 0.58);
-  backdrop-filter: blur(2px);
+  pointer-events: none;
 }
 
 .main {
+  position: relative;
+  z-index: 2;
   min-height: 100vh;
   width: min(900px, 100%);
   margin: 0 auto;
