@@ -20,6 +20,11 @@
   opacity: 0.92;
 }
 
+.highlight {
+  color: #ffd166;
+  text-shadow: 0 0 18px rgba(255, 209, 102, 0.35);
+}
+
 .lineTwo {
   margin-top: 0.25em;
   font-size: 1.08em;
