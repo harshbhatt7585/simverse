@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { Manrope, Orbitron } from "next/font/google";
+import { Orbitron, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-const manrope = Manrope({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-ui",
 });
@@ -24,7 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${orbitron.variable}`}>{children}</body>
+      <body className={`${spaceGrotesk.variable} ${orbitron.variable}`}>{children}</body>
     </html>
   );
 }

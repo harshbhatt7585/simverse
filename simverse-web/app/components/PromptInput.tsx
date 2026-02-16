@@ -6,11 +6,11 @@ type PromptInputProps = {
 
 export default function PromptInput({ placeholder }: PromptInputProps) {
   return (
-    <input
-      className={styles.input}
-      type="text"
+    <textarea
+      className={styles.textarea}
       placeholder={placeholder}
       aria-label="Environment description"
+      rows={5}
     />
   );
 }

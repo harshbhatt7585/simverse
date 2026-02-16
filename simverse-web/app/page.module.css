@@ -17,9 +17,7 @@
   position: fixed;
   inset: 0;
   z-index: 1;
-  background:
-    radial-gradient(circle at 50% 35%, rgba(15, 34, 72, 0.3), transparent 50%),
-    rgba(4, 9, 20, 0.72);
+  background: rgba(0, 0, 0, 0.64);
   pointer-events: none;
 }
 
