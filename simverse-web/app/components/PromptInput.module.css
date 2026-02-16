@@ -1,4 +1,6 @@
 .input {
+  font-family: var(--font-ui), "Segoe UI", sans-serif;
+  font-weight: 600;
   width: min(760px, 100%);
   border: 1px solid #33466f;
   border-radius: 16px;
@@ -6,7 +8,7 @@
   color: #f7faff;
   padding: 20px 22px;
   min-height: 68px;
-  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  font-size: clamp(1.05rem, 2.4vw, 1.3rem);
   line-height: 1.35;
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.35),
