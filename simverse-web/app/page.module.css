@@ -1,0 +1,9 @@
+.main {
+  min-height: 100vh;
+  width: min(900px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  align-content: center;
+  gap: 16px;
+}
