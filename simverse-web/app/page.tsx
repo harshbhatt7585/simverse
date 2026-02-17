@@ -1,5 +1,6 @@
 import PageHeading from "./components/PageHeading";
 import PromptInput from "./components/PromptInput";
+import SimverseLogo from "./components/SimverseLogo";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -16,6 +17,7 @@ export default function Home() {
         <source src="/videos/48354-453189085.mp4" type="video/mp4" />
       </video>
       <div className={styles.overlay} />
+      <SimverseLogo />
 
       <main className={styles.main}>
         <PageHeading

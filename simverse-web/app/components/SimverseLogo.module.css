@@ -1,0 +1,38 @@
+.logo {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.name {
+  font-family: var(--font-display), "Segoe UI", sans-serif;
+  font-weight: 800;
+  font-size: 1.04rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fff2dc;
+  text-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.6),
+    0 0 16px rgba(255, 221, 173, 0.24);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.logo:hover .name {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .logo {
+    top: 14px;
+    left: 14px;
+  }
+
+  .name {
+    font-size: 0.88rem;
+  }
+}
