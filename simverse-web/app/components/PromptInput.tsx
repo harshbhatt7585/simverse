@@ -6,11 +6,14 @@ type PromptInputProps = {
 
 export default function PromptInput({ placeholder }: PromptInputProps) {
   return (
-    <textarea
-      className={styles.textarea}
-      placeholder={placeholder}
-      aria-label="Environment description"
-      rows={5}
-    />
+    <section className={styles.composer} aria-label="Environment prompt composer">
+      <textarea
+        id="environment-prompt"
+        className={styles.textarea}
+        placeholder={placeholder}
+        aria-label="Environment description"
+        rows={6}
+      />
+    </section>
   );
 }
