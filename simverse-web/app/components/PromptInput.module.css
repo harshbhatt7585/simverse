@@ -8,6 +8,12 @@
   transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .textarea {
   font-family: var(--font-ui), "Segoe UI", sans-serif;
   font-weight: 500;
@@ -30,6 +36,33 @@
 
 .textarea:focus {
   outline: none;
+}
+
+.submitButton {
+  align-self: flex-end;
+  border: 1px solid rgba(255, 232, 198, 0.4);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 220, 166, 0.96), rgba(255, 177, 96, 0.95));
+  color: #231f1b;
+  font-family: var(--font-ui), "Segoe UI", sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.62rem 1.2rem;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+.submitButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(8, 10, 13, 0.34);
+  filter: brightness(1.03);
+}
+
+.submitButton:focus-visible {
+  outline: 2px solid rgba(255, 233, 204, 0.95);
+  outline-offset: 2px;
 }
 
 .composer:focus-within {
