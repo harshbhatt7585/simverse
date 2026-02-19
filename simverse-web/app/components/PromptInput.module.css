@@ -65,6 +65,46 @@
   outline-offset: 2px;
 }
 
+.submitButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  filter: grayscale(0.18);
+  transform: none;
+  box-shadow: none;
+}
+
+.templatePanel {
+  margin-top: 14px;
+  border-top: 1px solid rgba(255, 232, 198, 0.18);
+  padding: 14px 10px 8px;
+}
+
+.templateHeading {
+  margin: 0 0 10px;
+  font-family: var(--font-display), "Segoe UI", sans-serif;
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 226, 178, 0.88);
+}
+
+.templateOutput {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 0.88rem;
+  color: #f5f1ea;
+  border: 1px solid rgba(255, 236, 207, 0.2);
+  border-radius: 12px;
+  background: rgba(20, 22, 26, 0.8);
+  padding: 12px;
+  max-height: min(45vh, 400px);
+  overflow: auto;
+}
+
 .composer:focus-within {
   border-color: rgba(255, 236, 207, 0.56);
   box-shadow:
