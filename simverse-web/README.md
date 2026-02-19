@@ -18,6 +18,16 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Agentic Template Flow
+
+The prompt composer now supports a basic agentic template generation flow:
+
+1. Enter an environment description in the textarea.
+2. Click `Submit`.
+3. The app renders a structured RL environment template below the form.
+
+Template generation logic lives in `lib/agenticTemplate.ts`, and UI wiring lives in `app/components/PromptInput.tsx`.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
