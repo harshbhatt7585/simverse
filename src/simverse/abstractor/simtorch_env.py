@@ -118,6 +118,58 @@ class SimTorchEnv(nn.Module, ABC):
 
         return action_tensor.to(device=self.device, dtype=torch.int64)
 
+    def _assign_agents(
+        self,
+        agents: Sequence[Any],
+        *,
+        expected_count: int | None = None,
+        label: str = "Environment",
+    ) -> None:
+        expected = int(self.num_agents if expected_count is None else expected_count)
+        if len(agents) != expected:
+            raise ValueError(f"{label} requires exactly {expected} agents")
+        self.agents = list(agents)
+
+    def _empty_rewards(self, *, num_agents: int | None = None) -> torch.Tensor:
+        agent_count = int(self.num_agents if num_agents is None else num_agents)
+        return torch.zeros((self.num_envs, agent_count), dtype=self.dtype, device=self.device)
+
+    def _reset_episode_state(self, *, winner_none: int | None = None) -> None:
+        if hasattr(self, "done"):
+            self.done.zero_()
+        if hasattr(self, "steps"):
+            self.steps.zero_()
+        if winner_none is not None and hasattr(self, "winner"):
+            self.winner.fill_(int(winner_none))
+
+    def _pack_observation_dict(
+        self,
+        obs: torch.Tensor,
+        *,
+        clone_obs: bool = False,
+        extra: Mapping[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"obs": obs.clone() if clone_obs else obs}
+        if hasattr(self, "done"):
+            payload["done"] = self.done.clone()
+        if hasattr(self, "winner"):
+            payload["winner"] = self.winner.clone()
+        if hasattr(self, "steps"):
+            payload["steps"] = self.steps.clone()
+        if extra:
+            payload.update(dict(extra))
+        return payload
+
+    def _build_info(self, *, extra: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+        info: Dict[str, Any] = {}
+        if hasattr(self, "winner"):
+            info["winner"] = self.winner.clone()
+        if hasattr(self, "steps"):
+            info["steps"] = self.steps.clone()
+        if extra:
+            info.update(dict(extra))
+        return info
+
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
         if args:
