@@ -36,7 +36,7 @@ class MazeRaceTorchEnv(SimTorchEnv):
         if self.config.num_agents not in (1, 2):
             raise ValueError("MazeRaceTorchEnv supports 1 or 2 agents")
 
-        self.num_envs = num_envs or getattr(config, "num_envs", 1)
+        self.num_envs = self._resolve_num_envs(num_envs, config)
         self.num_agents = self.config.num_agents
         self.width = int(self.config.width)
         self.height = int(self.config.height)
@@ -194,24 +194,7 @@ class MazeRaceTorchEnv(SimTorchEnv):
         return obs, rewards, self.done.clone(), info
 
     def _normalize_actions(self, actions: torch.Tensor | None) -> torch.Tensor:
-        if actions is None:
-            return torch.full(
-                (self.num_envs, self.num_agents),
-                -1,
-                dtype=torch.int64,
-                device=self.device,
-            )
-        if not isinstance(actions, torch.Tensor):
-            actions = torch.as_tensor(actions)
-        if actions.ndim == 1:
-            if self.num_envs == 1 and actions.numel() == self.num_agents:
-                actions = actions.unsqueeze(0)
-            elif self.num_agents == 1 and actions.numel() == self.num_envs:
-                actions = actions.unsqueeze(1)
-        expected_shape = (self.num_envs, self.num_agents)
-        if tuple(actions.shape) != expected_shape:
-            raise ValueError(f"Expected actions shape {expected_shape}, got {tuple(actions.shape)}")
-        return actions.to(device=self.device, dtype=torch.int64)
+        return self._normalize_action_matrix(actions)
 
     def _build_maze(self) -> torch.Tensor:
         walls = torch.zeros((self.height, self.width), dtype=torch.bool)
