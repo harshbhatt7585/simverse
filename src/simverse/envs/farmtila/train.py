@@ -37,10 +37,11 @@ def parse_args() -> argparse.Namespace:
         default="on",
         help="Enable or disable Weights & Biases logging",
     )
+    parser.add_argument("--compile", choices=["on", "off"], default="on")
     return parser.parse_args()
 
 
-def train(use_wandb: bool = True):
+def train(use_wandb: bool = True, use_compile: bool = True):
     training_config = build_training_config(
         num_agents=2,
         num_envs=2048,
@@ -86,10 +87,14 @@ def train(use_wandb: bool = True):
         run_name="ppo-training",
         episode_save_dir="recordings/farmtila",
         use_wandb=use_wandb,
+        use_compile=use_compile,
         policy_name_prefix="simple_agent",
     )
 
 
 if __name__ == "__main__":
     cli_args = parse_args()
-    train(use_wandb=cli_args.wandb == "on")
+    train(
+        use_wandb=cli_args.wandb == "on",
+        use_compile=cli_args.compile == "on",
+    )
