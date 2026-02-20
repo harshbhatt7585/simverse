@@ -105,26 +105,20 @@ class MazeRaceTorchEnv(SimTorchEnv):
         )
 
     def assign_agents(self, agents: list[MazeRaceAgent]) -> None:
-        if len(agents) != self.num_agents:
-            raise ValueError(f"MazeRace requires exactly {self.num_agents} agents")
-        self.agents = agents
+        self._assign_agents(agents, label="MazeRace")
 
     def reset(self) -> Dict[str, torch.Tensor]:
         for idx, (sx, sy) in enumerate(self.start_positions):
             self.agent_pos[:, idx, 0] = sx
             self.agent_pos[:, idx, 1] = sy
-        self.steps.zero_()
-        self.done.zero_()
-        self.winner.fill_(self.WINNER_NONE)
+        self._reset_episode_state(winner_none=self.WINNER_NONE)
         return self._get_observation()
 
     def step(
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         action_tensor = self._normalize_actions(actions)
-        rewards = torch.zeros(
-            (self.num_envs, self.num_agents), dtype=self.dtype, device=self.device
-        )
+        rewards = self._empty_rewards()
         active = ~self.done
 
         for agent_id in range(self.num_agents):
@@ -187,10 +181,7 @@ class MazeRaceTorchEnv(SimTorchEnv):
         self.done |= finished | timed_out
 
         obs = self._get_observation()
-        info = {
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-        }
+        info = self._build_info()
         return obs, rewards, self.done.clone(), info
 
     def _normalize_actions(self, actions: torch.Tensor | None) -> torch.Tensor:
@@ -231,9 +222,4 @@ class MazeRaceTorchEnv(SimTorchEnv):
                 self.agent_pos[:, idx, 0],
             ] = 1.0
 
-        return {
-            "obs": self.obs_buffer,
-            "done": self.done.clone(),
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-        }
+        return self._pack_observation_dict(self.obs_buffer)

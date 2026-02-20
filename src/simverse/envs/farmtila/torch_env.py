@@ -102,9 +102,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         )
 
     def assign_agents(self, agents: list[FarmtilaAgent]) -> None:
-        if len(agents) != 2:
-            raise ValueError("Competitive Farmtila requires exactly 2 agents")
-        self.agents = agents
+        self._assign_agents(agents, expected_count=2, label="Competitive Farmtila")
 
     def reset(self) -> Dict[str, torch.Tensor]:
         self.seed_grid.zero_()
@@ -113,9 +111,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         self.inventory.zero_()
         self.harvested_tiles.zero_()
         self.seeds_spawned.zero_()
-        self.steps.zero_()
-        self.done.zero_()
-        self.winner.fill_(-1)
+        self._reset_episode_state(winner_none=-1)
         self._spawn_agents()
         self._spawn_seeds_if_due(force=True)
         return self._get_observation()
@@ -124,11 +120,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         action_tensor = self._normalize_actions(actions)
-        rewards = torch.zeros(
-            (self.num_envs, self.num_agents),
-            dtype=self.dtype,
-            device=self.device,
-        )
+        rewards = self._empty_rewards()
         active_mask = ~self.done
         env_idx = self.env_idx
 
@@ -199,7 +191,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
             rewards[:, 1] -= delta_change
 
         obs = self._get_observation()
-        info = {"winner": self.winner.clone(), "steps": self.steps.clone()}
+        info = self._build_info()
         return obs, rewards, self.done.clone(), info
 
     def _normalize_actions(self, actions: torch.Tensor | None) -> torch.Tensor:
@@ -326,9 +318,4 @@ class FarmtilaTorchEnv(SimTorchEnv):
             dim=1,
         )
 
-        return {
-            "obs": obs,
-            "done": self.done.clone(),
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-        }
+        return self._pack_observation_dict(obs)

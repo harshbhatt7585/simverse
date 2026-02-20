@@ -98,14 +98,10 @@ class BattleGridTorchEnv(SimTorchEnv):
         )
 
     def assign_agents(self, agents: list[BattleGridAgent]) -> None:
-        if len(agents) != self.num_agents:
-            raise ValueError(f"BattleGrid requires exactly {self.num_agents} agents")
-        self.agents = agents
+        self._assign_agents(agents, label="BattleGrid")
 
     def reset(self) -> Dict[str, torch.Tensor]:
-        self.steps.zero_()
-        self.done.zero_()
-        self.winner.fill_(self.WINNER_NONE)
+        self._reset_episode_state(winner_none=self.WINNER_NONE)
         self.health.fill_(self.max_health)
         self._spawn_unique_positions()
         return self._get_observation()
@@ -114,9 +110,7 @@ class BattleGridTorchEnv(SimTorchEnv):
         self, actions: torch.Tensor
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         action_tensor = self._normalize_actions(actions)
-        rewards = torch.zeros(
-            (self.num_envs, self.num_agents), dtype=self.dtype, device=self.device
-        )
+        rewards = self._empty_rewards()
         active = ~self.done
 
         old_pos = self.agent_pos.clone()
@@ -242,11 +236,7 @@ class BattleGridTorchEnv(SimTorchEnv):
         self.done |= finished | timed_out
 
         obs = self._get_observation()
-        info = {
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-            "health": self.health.clone(),
-        }
+        info = self._build_info(extra={"health": self.health.clone()})
         return obs, rewards, self.done.clone(), info
 
     def _normalize_actions(self, actions: torch.Tensor | None) -> torch.Tensor:
@@ -308,10 +298,4 @@ class BattleGridTorchEnv(SimTorchEnv):
         self.obs_buffer[:, 3].copy_(hp1.expand(-1, self.height, self.width))
         self.obs_buffer[:, 4].copy_(step_progress.expand(-1, self.height, self.width))
 
-        return {
-            "obs": self.obs_buffer,
-            "done": self.done.clone(),
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-            "health": self.health.clone(),
-        }
+        return self._pack_observation_dict(self.obs_buffer, extra={"health": self.health.clone()})

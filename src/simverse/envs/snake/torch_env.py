@@ -190,9 +190,7 @@ class SnakeTorchEnv(SimTorchEnv):
         )
 
     def assign_agents(self, agents: list[SnakeAgent]) -> None:
-        if len(agents) != 1:
-            raise ValueError("SnakeTorchEnv requires exactly one agent")
-        self.agents = agents
+        self._assign_agents(agents, expected_count=1, label="SnakeTorchEnv")
 
     def reset(self) -> Dict[str, torch.Tensor]:
         self._reset_indices(torch.arange(self.num_envs, device=self.device, dtype=torch.int64))
@@ -209,24 +207,21 @@ class SnakeTorchEnv(SimTorchEnv):
 
         action_tensor = self._normalize_actions(actions)
 
-        rewards = torch.zeros(
-            (self.num_envs, self.num_agents),
-            dtype=self.dtype,
-            device=self.device,
-        )
+        rewards = self._empty_rewards()
         active = ~self.done
         active_indices = torch.nonzero(active, as_tuple=True)[0]
         if active_indices.numel() == 0:
             obs = self._get_observation()
-            info = {
-                "steps": self.steps.clone(),
-                "score": self.score.clone(),
-                "snake_length": self.snake_length.clone(),
-                "slength": self.snake_length.clone(),
-                "head_pos": self.snake_segments[:, 0, :].clone(),
-                "food_pos": self.food_pos.clone(),
-                "termination_reason": self.termination_reason.clone(),
-            }
+            info = self._build_info(
+                extra={
+                    "score": self.score.clone(),
+                    "snake_length": self.snake_length.clone(),
+                    "slength": self.snake_length.clone(),
+                    "head_pos": self.snake_segments[:, 0, :].clone(),
+                    "food_pos": self.food_pos.clone(),
+                    "termination_reason": self.termination_reason.clone(),
+                }
+            )
             return obs, rewards, self.done.clone(), info
 
         chosen_actions = action_tensor[:, 0]
@@ -329,16 +324,17 @@ class SnakeTorchEnv(SimTorchEnv):
         self.done |= crashed | timed_out
 
         obs = self._get_observation()
-        info = {
-            "steps": self.steps.clone(),
-            "score": self.score.clone(),
-            "snake_length": self.snake_length.clone(),
-            "slength": self.snake_length.clone(),
-            "head_pos": self.snake_segments[:, 0, :].clone(),
-            "food_pos": self.food_pos.clone(),
-            "termination_reason": self.termination_reason.clone(),
-            "distance_to_food": new_dist.clone(),
-        }
+        info = self._build_info(
+            extra={
+                "score": self.score.clone(),
+                "snake_length": self.snake_length.clone(),
+                "slength": self.snake_length.clone(),
+                "head_pos": self.snake_segments[:, 0, :].clone(),
+                "food_pos": self.food_pos.clone(),
+                "termination_reason": self.termination_reason.clone(),
+                "distance_to_food": new_dist.clone(),
+            }
+        )
         return obs, rewards, self.done.clone(), info
 
     def get_observation(self) -> Dict[str, torch.Tensor]:
@@ -576,17 +572,17 @@ class SnakeTorchEnv(SimTorchEnv):
             self.snake_coords_buffer[env_ids[valid_mask], coord_idx_x, 0] = seg_x[valid_mask]
             self.snake_coords_buffer[env_ids[valid_mask], coord_idx_y, 1] = seg_y[valid_mask]
 
-        return {
-            # Return a snapshot so caller-side tensors do not alias this mutable buffer
-            # across step() calls.
-            "obs": self.obs_buffer.clone(),
-            "grid": self.grid_buffer.clone(),
-            "head_pos": torch.stack((head_x, head_y), dim=1).clone(),
-            "food_pos": self.food_pos.clone(),
-            "snake_coords": self.snake_coords_buffer.clone(),
-            "snake_length": self.snake_length.clone(),
-            "done": self.done.clone(),
-            "steps": self.steps.clone(),
-            "score": self.score.clone(),
-            "termination_reason": self.termination_reason.clone(),
-        }
+        return self._pack_observation_dict(
+            self.obs_buffer,
+            clone_obs=True,
+            extra={
+                # Return snapshots so caller-side tensors do not alias mutable buffers.
+                "grid": self.grid_buffer.clone(),
+                "head_pos": torch.stack((head_x, head_y), dim=1).clone(),
+                "food_pos": self.food_pos.clone(),
+                "snake_coords": self.snake_coords_buffer.clone(),
+                "snake_length": self.snake_length.clone(),
+                "score": self.score.clone(),
+                "termination_reason": self.termination_reason.clone(),
+            },
+        )

@@ -147,17 +147,13 @@ class GymTorchEnv(SimTorchEnv):
         return self._observation_space
 
     def assign_agents(self, agents: list[Any]) -> None:
-        if len(agents) != 1:
-            raise ValueError("GymTorchEnv requires exactly one agent")
-        self.agents = agents
+        self._assign_agents(agents, expected_count=1, label="GymTorchEnv")
 
     def reset(self) -> Dict[str, torch.Tensor]:
         obs_batch, _ = self.vector_env.reset(seed=self._next_seed())
         obs_tensor = self._obs_batch_to_tensor(obs_batch)
 
-        self.done.zero_()
-        self.winner.fill_(self.WINNER_NONE)
-        self.steps.zero_()
+        self._reset_episode_state(winner_none=self.WINNER_NONE)
         self._episode_returns.fill(0.0)
         self._episode_lengths.fill(0)
         self._last_obs = obs_tensor
@@ -210,32 +206,27 @@ class GymTorchEnv(SimTorchEnv):
 
         self._last_obs = obs_tensor
 
-        info_dict: Dict[str, Any] = {
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-            "episode_return": torch.as_tensor(
-                finished_return,
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            "episode_length": torch.as_tensor(
-                finished_length,
-                dtype=torch.int64,
-                device=self.device,
-            ),
-        }
+        info_dict: Dict[str, Any] = self._build_info(
+            extra={
+                "episode_return": torch.as_tensor(
+                    finished_return,
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
+                "episode_length": torch.as_tensor(
+                    finished_length,
+                    dtype=torch.int64,
+                    device=self.device,
+                ),
+            }
+        )
         if isinstance(info, dict):
             info_dict["gym_info"] = info
 
         return self._pack_observation(obs_tensor), reward_tensor, done_tensor.clone(), info_dict
 
     def _pack_observation(self, obs_tensor: torch.Tensor) -> Dict[str, torch.Tensor]:
-        return {
-            "obs": obs_tensor,
-            "done": self.done.clone(),
-            "winner": self.winner.clone(),
-            "steps": self.steps.clone(),
-        }
+        return self._pack_observation_dict(obs_tensor)
 
     def _obs_batch_to_tensor(self, obs_batch: np.ndarray) -> torch.Tensor:
         chw_batch = observation_batch_to_chw(obs_batch)
