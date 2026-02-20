@@ -30,7 +30,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         if self.config.num_agents != 2:
             raise ValueError("Competitive Farmtila requires exactly 2 agents")
 
-        self.num_envs = num_envs or getattr(config, "num_envs", 1)
+        self.num_envs = self._resolve_num_envs(num_envs, config)
         self.width = config.width
         self.height = config.height
         self.num_agents = config.num_agents
@@ -203,27 +203,7 @@ class FarmtilaTorchEnv(SimTorchEnv):
         return obs, rewards, self.done.clone(), info
 
     def _normalize_actions(self, actions: torch.Tensor | None) -> torch.Tensor:
-        if actions is None:
-            return torch.full(
-                (self.num_envs, self.num_agents),
-                -1,
-                dtype=torch.int64,
-                device=self.device,
-            )
-        if not isinstance(actions, torch.Tensor):
-            actions = torch.as_tensor(actions)
-        if actions.ndim == 1:
-            if self.num_envs == 1 and actions.numel() == self.num_agents:
-                actions = actions.unsqueeze(0)
-            elif self.num_agents == 1 and actions.numel() == self.num_envs:
-                actions = actions.unsqueeze(1)
-        if actions.shape != (self.num_envs, self.num_agents):
-            raise ValueError(
-                f"Expected actions shape {(self.num_envs, self.num_agents)}, got {actions.shape}"
-            )
-        if actions.device != self.device or actions.dtype != torch.int64:
-            actions = actions.to(device=self.device, dtype=torch.int64)
-        return actions
+        return self._normalize_action_matrix(actions)
 
     def _spawn_agents(self) -> None:
         positions = torch.stack(
