@@ -10,15 +10,13 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 import torch
-
 from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import build_adam_optimizers
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
-from simverse.envs.farmtila.config import FarmtilaConfig
+from simverse.envs.farmtila.config import FarmtilaConfig, build_training_config
 from simverse.envs.farmtila.env import FarmtilaEnv, create_env
-from simverse.envs.farmtila.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
 from simverse.simulator import Simulator
