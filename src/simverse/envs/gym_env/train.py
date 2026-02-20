@@ -16,20 +16,14 @@ import torch
 import torch.nn as nn
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.train_utils import (
-    build_adam_optimizers,
     build_ppo_training_config,
-    compile_policy_models,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
+    run_ppo_training,
 )
-from simverse.agent.stats import TrainingStats
-from simverse.config.policy import PolicySpec
 from simverse.envs.gym_env.env import GymEnv, create_env
 from simverse.envs.gym_env.torch_env import GymTorchConfig, observation_batch_to_chw
-from simverse.losses.ppo import PPOTrainer
-from simverse.simulator import Simulator
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 class GymMLPPolicy(nn.Module):
@@ -250,23 +244,6 @@ def train(
     )
 
     env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
-
-    policy_specs = [
-        PolicySpec(
-            name=f"{env_id}_agent_0",
-            model=GymMLPPolicy(obs_space=env.observation_space, action_space=env.action_space),
-        )
-    ]
-    env.config.policies = policy_specs
-
-    policy_models = compile_policy_models(
-        policy_specs,
-        use_compile=use_compile,
-        device=device,
-    )
-    optimizers = build_adam_optimizers(policy_models, lr=lr, device=device)
-
-    stats = TrainingStats()
     training_config = build_ppo_training_config(
         num_agents=config.num_agents,
         num_envs=config.num_envs,
@@ -281,44 +258,31 @@ def train(
         extras={"env_id": env_id},
     )
 
-    resolved_project_name = DEFAULT_WANDB_PROJECT
     resolved_run_name = (
         f"{env_id.replace('/', '_').lower()}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
-    loss_trainer = PPOTrainer(
-        optimizers=optimizers,
-        episodes=training_config["episodes"],
-        training_epochs=training_config["training_epochs"],
-        clip_epsilon=training_config["clip_epsilon"],
-        gamma=training_config["gamma"],
-        gae_lambda=training_config["gae_lambda"],
-        stats=stats,
-        config=training_config,
-        project_name=resolved_project_name,
-        run_name=resolved_run_name,
-        episode_save_dir="recordings/gym_env",
-        device=training_config["device"],
-        batch_size=training_config["batch_size"],
-        buffer_size=training_config["buffer_size"],
-        dtype=training_config["dtype"],
-        use_wandb=use_wandb,
-    )
-
-    simulator = Simulator(
-        env=env,
-        num_agents=config.num_agents,
-        policies=policy_models,
-        loss_trainer=loss_trainer,
-        agent_factory=agent_factory,
-    )
-
+    policy_models: list[nn.Module] = []
     try:
-        simulator.train(title=f"{env_id} Training")
+        policy_models = run_ppo_training(
+            env=env,
+            training_config=training_config,
+            agent_factory=agent_factory,
+            policy_factory=lambda obs_space, action_space: GymMLPPolicy(
+                obs_space=obs_space,
+                action_space=action_space,
+            ),
+            title=f"{env_id} Training",
+            run_name=resolved_run_name,
+            episode_save_dir="recordings/gym_env",
+            use_wandb=use_wandb,
+            use_compile=use_compile,
+            policy_name_prefix=f"{env_id}_agent",
+        )
     finally:
         env.close()
 
-    if record_video:
+    if record_video and policy_models:
         _record_policy_video(
             env_id=env_id,
             policy=policy_models[0],
