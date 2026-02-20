@@ -32,7 +32,7 @@ class SnakeTorchEnv(SimTorchEnv):
         if int(self.config.num_agents) != 1:
             raise ValueError("SnakeTorchEnv supports exactly one agent")
 
-        self.num_envs = max(1, int(num_envs or self.config.num_envs))
+        self.num_envs = self._resolve_num_envs(num_envs, self.config)
         self.num_agents = 1
         self.width = int(self.config.width)
         self.height = int(self.config.height)
@@ -348,34 +348,11 @@ class SnakeTorchEnv(SimTorchEnv):
         self,
         actions: torch.Tensor | Sequence[int] | np.ndarray | Dict[int, int] | None,
     ) -> torch.Tensor:
-        if actions is None:
-            return torch.full((self.num_envs, 1), -1, dtype=torch.int64, device=self.device)
-
-        if isinstance(actions, dict):
-            if self.num_envs != 1:
-                raise ValueError("Dict actions are supported only when num_envs == 1")
-            action_value = int(actions.get(0, -1))
-            return torch.as_tensor([[action_value]], dtype=torch.int64, device=self.device)
-
-        action_tensor = actions if isinstance(actions, torch.Tensor) else torch.as_tensor(actions)
-
-        if action_tensor.ndim == 0:
-            action_tensor = action_tensor.unsqueeze(0)
-        if action_tensor.ndim == 2 and action_tensor.shape[1] == 1:
-            action_tensor = action_tensor[:, 0]
-        if action_tensor.ndim != 1:
-            raise ValueError(
-                "Expected actions with shape [num_envs] or [num_envs, 1], "
-                f"got {tuple(action_tensor.shape)}"
-            )
-
-        if action_tensor.shape[0] == 1 and self.num_envs > 1:
-            action_tensor = action_tensor.repeat(self.num_envs)
-
-        if action_tensor.shape[0] != self.num_envs:
-            raise ValueError(f"Expected {self.num_envs} actions, got {int(action_tensor.shape[0])}")
-
-        action_tensor = action_tensor.to(device=self.device, dtype=torch.int64)
+        action_tensor = self._normalize_single_agent_actions(
+            actions,
+            missing_action=-1,
+            dict_default=-1,
+        )
         invalid = (action_tensor < 0) | (action_tensor > self.ACTION_RIGHT)
         action_tensor = torch.where(invalid, torch.full_like(action_tensor, -1), action_tensor)
         return action_tensor.unsqueeze(1)
