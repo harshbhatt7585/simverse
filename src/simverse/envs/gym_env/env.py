@@ -6,7 +6,7 @@ from typing import Any, Dict, Sequence, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simtorch_env import SimTorchEnv
+from simverse.abstractor.simenv import SimEnv
 
 # Gymnasium releases that still use np.float_ break on NumPy 2.x; restore alias for compatibility.
 if not hasattr(np, "float_"):
@@ -46,7 +46,7 @@ def observation_batch_to_chw(obs_batch: np.ndarray) -> np.ndarray:
     return flattened[:, None, None, :]
 
 
-class GymTorchEnv(SimTorchEnv):
+class GymTorchEnv(SimEnv):
     """Torch-friendly wrapper around Gymnasium vector environments.
 
     This wrapper currently supports single-agent discrete-action Gym environments.

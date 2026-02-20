@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.simenv import SimEnv
-from simverse.abstractor.simtorch_env import SimTorchEnv
 from simverse.abstractor.trainer import Trainer
 from simverse.agent.stats import TrainingStats
 from simverse.logging_config import get_logger, training_logger
@@ -852,7 +851,7 @@ class PPOTrainer(Trainer):
 
         self._init_logging(title)
         training_logger.success("Environment and policies initialized")
-        if isinstance(self.env, SimTorchEnv):
+        if isinstance(self.env, SimEnv):
             mode = "enabled" if self.enable_torch_fastpath else "disabled"
             training_logger.info(f"Torch fastpath {mode}")
 
@@ -878,7 +877,7 @@ class PPOTrainer(Trainer):
                 record_env_idx = random.randrange(max(self.env_batch_size, 1))
             else:
                 record_env_idx = None
-            use_torch_fastpath = isinstance(self.env, SimTorchEnv) and self.enable_torch_fastpath
+            use_torch_fastpath = isinstance(self.env, SimEnv) and self.enable_torch_fastpath
             competitive_zero_sum = hasattr(self.env.config, "score_delta_reward")
             episode_reward = 0.0
             episode_reward_tensor = (
@@ -1043,7 +1042,7 @@ class PPOTrainer(Trainer):
 
                 actions_per_env: List[Dict[int, int]] | None = None
                 action_tensors: List[torch.Tensor] = []
-                if not isinstance(self.env, SimTorchEnv):
+                if not isinstance(self.env, SimEnv):
                     actions_per_env = [{} for _ in range(batch_envs)]
                 collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
 
@@ -1065,7 +1064,7 @@ class PPOTrainer(Trainer):
                         "value": value.squeeze(-1).to(dtype=torch.float32),
                     }
 
-                    if isinstance(self.env, SimTorchEnv):
+                    if isinstance(self.env, SimEnv):
                         action_tensors.append(action)
                     else:
                         action_cpu = action.detach().cpu()
@@ -1075,7 +1074,7 @@ class PPOTrainer(Trainer):
                             )
 
                 env_actions: Union[Sequence[Dict[int, int]], Dict[int, int], torch.Tensor]
-                if isinstance(self.env, SimTorchEnv):
+                if isinstance(self.env, SimEnv):
                     if action_tensors:
                         env_actions = torch.stack(action_tensors, dim=1)
                     else:
@@ -1107,7 +1106,7 @@ class PPOTrainer(Trainer):
                     env_to_record = min(record_env_idx, batch_envs - 1)
                     frame_obs = self._extract_env_observation(obs, env_to_record)
                     frame_reward = self._reward_row_to_dict(reward_array_cpu[env_to_record])
-                    if isinstance(self.env, SimTorchEnv):
+                    if isinstance(self.env, SimEnv):
                         frame_actions = {
                             agent_id: int(action_tensors[agent_id][env_to_record].item())
                             for agent_id in range(self.env.config.num_agents)

@@ -8,11 +8,12 @@ An environment package is considered complete when it includes:
 
 ## Recommended Pattern
 
-1. `torch_env.py` holds core environment logic and inherits `SimTorchEnv`.
-2. `env.py` exposes:
-   - a canonical `*Env` class that extends `*TorchEnv`
+1. `env.py` holds core torch environment logic and inherits `SimEnv`.
+2. `torch_env.py` can remain as a thin compatibility re-export.
+3. `env.py` exposes:
+   - a canonical `*Env` alias for the torch implementation
    - `create_env(...)` factory
-3. `train.py` uses shared helpers from `simverse.abstractor.train_utils`:
+4. `train.py` uses shared helpers from `simverse.abstractor.train_utils`:
    - `resolve_torch_device`
    - `resolve_rollout_dtype`
    - `configure_torch_backend`

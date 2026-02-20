@@ -5,12 +5,12 @@ from typing import Any, Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simtorch_env import SimTorchEnv
+from simverse.abstractor.simenv import SimEnv
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
 
 
-class MazeRaceTorchEnv(SimTorchEnv):
+class MazeRaceTorchEnv(SimEnv):
     """Simple maze racing env. First agent to its goal wins."""
 
     ACTION_STAY = 0

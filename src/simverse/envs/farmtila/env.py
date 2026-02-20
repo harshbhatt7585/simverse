@@ -5,12 +5,12 @@ from typing import Any, Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simtorch_env import SimTorchEnv
+from simverse.abstractor.simenv import SimEnv
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
 
 
-class FarmtilaTorchEnv(SimTorchEnv):
+class FarmtilaTorchEnv(SimEnv):
     HARVEST_ACTION = 4
     PICKUP_ACTION = 5
     ACTION_SPACE = gym.spaces.Discrete(6)

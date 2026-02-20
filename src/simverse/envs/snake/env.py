@@ -5,12 +5,12 @@ from typing import Any, Dict, Sequence, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simtorch_env import SimTorchEnv
+from simverse.abstractor.simenv import SimEnv
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
 
 
-class SnakeTorchEnv(SimTorchEnv):
+class SnakeTorchEnv(SimEnv):
     """Torch-native batched Snake environment for PPO training."""
 
     ACTION_UP = 0

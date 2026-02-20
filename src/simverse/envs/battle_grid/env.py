@@ -5,12 +5,12 @@ from typing import Any, Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simtorch_env import SimTorchEnv
+from simverse.abstractor.simenv import SimEnv
 from simverse.envs.battle_grid.agent import BattleGridAgent
 from simverse.envs.battle_grid.config import BattleGridConfig
 
 
-class BattleGridTorchEnv(SimTorchEnv):
+class BattleGridTorchEnv(SimEnv):
     """Two-agent PvP grid world with movement and melee attacks."""
 
     ACTION_STAY = 0
