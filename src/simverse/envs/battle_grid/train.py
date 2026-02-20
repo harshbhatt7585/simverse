@@ -11,22 +11,16 @@ if __package__ is None or __package__.startswith("__main__"):
 import numpy as np
 import torch.nn as nn
 from simverse.abstractor.train_utils import (
-    build_adam_optimizers,
     build_ppo_training_config,
-    compile_policy_models,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
+    run_ppo_training,
 )
-from simverse.agent.stats import TrainingStats
-from simverse.config.policy import PolicySpec
 from simverse.envs.battle_grid.agent import BattleGridAgent
 from simverse.envs.battle_grid.config import BattleGridConfig
 from simverse.envs.battle_grid.env import BattleGridEnv, create_env
-from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
-from simverse.simulator import Simulator
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: nn.Module, env: BattleGridEnv) -> BattleGridAgent:
@@ -78,24 +72,6 @@ def train(
     )
 
     env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
-
-    policy_specs = [
-        PolicySpec(
-            name=f"battle_agent_{agent_id}",
-            model=SimplePolicy(obs_space=env.observation_space, action_space=env.action_space),
-        )
-        for agent_id in range(config.num_agents)
-    ]
-    env.config.policies = policy_specs
-
-    policy_models = compile_policy_models(
-        policy_specs,
-        use_compile=use_compile,
-        device=device,
-    )
-    optimizers = build_adam_optimizers(policy_models, lr=3e-4, device=device)
-
-    stats = TrainingStats()
     training_config = build_ppo_training_config(
         num_agents=config.num_agents,
         num_envs=config.num_envs,
@@ -109,33 +85,21 @@ def train(
         dtype=dtype,
     )
 
-    loss_trainer = PPOTrainer(
-        optimizers=optimizers,
-        episodes=training_config["episodes"],
-        training_epochs=training_config["training_epochs"],
-        clip_epsilon=training_config["clip_epsilon"],
-        gamma=training_config["gamma"],
-        gae_lambda=training_config["gae_lambda"],
-        stats=stats,
-        config=training_config,
-        project_name=DEFAULT_WANDB_PROJECT,
+    run_ppo_training(
+        env=env,
+        training_config=training_config,
+        agent_factory=agent_factory,
+        policy_factory=lambda obs_space, action_space: SimplePolicy(
+            obs_space=obs_space,
+            action_space=action_space,
+        ),
+        title="Battle Grid Training",
         run_name="ppo-battle-grid",
         episode_save_dir="recordings/battle_grid",
-        device=training_config["device"],
-        batch_size=training_config["batch_size"],
-        buffer_size=training_config["buffer_size"],
-        dtype=training_config["dtype"],
         use_wandb=use_wandb,
+        use_compile=use_compile,
+        policy_name_prefix="battle_agent",
     )
-
-    simulator = Simulator(
-        env=env,
-        num_agents=config.num_agents,
-        policies=policy_models,
-        loss_trainer=loss_trainer,
-        agent_factory=agent_factory,
-    )
-    simulator.train(title="Battle Grid Training")
 
 
 if __name__ == "__main__":
