@@ -69,7 +69,7 @@ class GymTorchEnv(SimTorchEnv):
         if int(self.config.num_agents) != 1:
             raise ValueError("GymTorchEnv currently supports exactly one agent")
 
-        self.num_envs = max(1, int(num_envs or self.config.num_envs))
+        self.num_envs = self._resolve_num_envs(num_envs, self.config)
         self.num_agents = 1
         self.agents: list[Any] = []
 
@@ -245,33 +245,11 @@ class GymTorchEnv(SimTorchEnv):
         self,
         actions: torch.Tensor | Sequence[int] | np.ndarray | Dict[int, int] | None,
     ) -> np.ndarray:
-        if actions is None:
-            return np.zeros((self.num_envs,), dtype=np.int64)
-
-        if isinstance(actions, dict):
-            if self.num_envs != 1:
-                raise ValueError("Dict actions are only supported when num_envs == 1")
-            return np.array([int(actions.get(0, 0))], dtype=np.int64)
-
-        action_tensor = actions if isinstance(actions, torch.Tensor) else torch.as_tensor(actions)
-
-        if action_tensor.ndim == 0:
-            action_tensor = action_tensor.unsqueeze(0)
-        elif action_tensor.ndim == 2 and action_tensor.shape[1] == 1:
-            action_tensor = action_tensor[:, 0]
-
-        if action_tensor.ndim != 1:
-            raise ValueError(
-                "Expected actions with shape [num_envs] or [num_envs, 1], "
-                f"got {tuple(action_tensor.shape)}"
-            )
-
-        if action_tensor.shape[0] == 1 and self.num_envs > 1:
-            action_tensor = action_tensor.repeat(self.num_envs)
-
-        if action_tensor.shape[0] != self.num_envs:
-            raise ValueError(f"Expected {self.num_envs} actions, got {int(action_tensor.shape[0])}")
-
+        action_tensor = self._normalize_single_agent_actions(
+            actions,
+            missing_action=0,
+            dict_default=0,
+        )
         action_tensor = action_tensor.to(dtype=torch.int64, device="cpu")
         action_tensor = torch.clamp(action_tensor, 0, self._single_action_space.n - 1)
         return action_tensor.numpy()
