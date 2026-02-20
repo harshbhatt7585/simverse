@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Dict, Mapping, Sequence
 
 import torch
 
@@ -115,10 +115,13 @@ def run_ppo_training(
     run_name: str = "ppo-training",
     episode_save_dir: str | None = None,
     use_wandb: bool = True,
+    use_compile: bool = False,
     project_name: str = DEFAULT_WANDB_PROJECT,
     policy_name_prefix: str = "agent",
-) -> None:
+    frame_sink: Callable[[Dict[str, Any]], None] | None = None,
+) -> list[torch.nn.Module]:
     num_agents = int(training_config["num_agents"])
+    device = str(training_config["device"])
     policy_specs = [
         PolicySpec(
             name=f"{policy_name_prefix}_{agent_id}",
@@ -129,11 +132,15 @@ def run_ppo_training(
     if hasattr(env, "config"):
         env.config.policies = policy_specs
 
-    policy_models = [policy_spec.model for policy_spec in policy_specs]
+    policy_models = compile_policy_models(
+        policy_specs,
+        use_compile=use_compile,
+        device=device,
+    )
     optimizers = build_adam_optimizers(
         policy_models,
         lr=float(training_config["lr"]),
-        device=str(training_config["device"]),
+        device=device,
     )
 
     loss_trainer = PPOTrainer(
@@ -148,7 +155,8 @@ def run_ppo_training(
         project_name=project_name,
         run_name=run_name,
         episode_save_dir=episode_save_dir,
-        device=str(training_config["device"]),
+        frame_sink=frame_sink,
+        device=device,
         batch_size=int(training_config["batch_size"]),
         buffer_size=int(training_config["buffer_size"]),
         dtype=training_config["dtype"],
@@ -163,3 +171,4 @@ def run_ppo_training(
         agent_factory=agent_factory,
     )
     simulator.train(title=title)
+    return policy_models
