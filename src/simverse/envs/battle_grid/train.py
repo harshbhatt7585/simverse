@@ -9,8 +9,7 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 import numpy as np
-
-from simverse.abstractor.policy import Policy
+import torch.nn as nn
 from simverse.abstractor.train_utils import (
     build_adam_optimizers,
     build_ppo_training_config,
@@ -30,7 +29,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-def agent_factory(agent_id: int, policy: Policy, env: BattleGridEnv) -> BattleGridAgent:
+def agent_factory(agent_id: int, policy: nn.Module, env: BattleGridEnv) -> BattleGridAgent:
     action_values = np.arange(getattr(env.action_space, "n", 6), dtype=np.int64)
     return BattleGridAgent(
         agent_id=agent_id,

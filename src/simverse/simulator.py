@@ -4,15 +4,15 @@ import random
 from typing import Callable, List, Optional, Protocol
 
 import torch
+import torch.nn as nn
 from torch.distributions import Categorical
 
 from simverse.abstractor.agent import SimAgent
-from simverse.abstractor.policy import Policy
 from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.trainer import Trainer
 from simverse.utils.checkpointer import Checkpointer
 
-AgentFactory = Callable[[int, Policy, SimEnv], SimAgent]
+AgentFactory = Callable[[int, nn.Module, SimEnv], SimAgent]
 
 
 class Renderer(Protocol):
@@ -30,7 +30,7 @@ class Simulator:
         self,
         env: SimEnv,
         num_agents: int,
-        policies: List[Policy],
+        policies: List[nn.Module],
         loss_trainer: Trainer,
         agent_factory: AgentFactory,
     ) -> None:

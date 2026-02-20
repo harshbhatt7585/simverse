@@ -14,13 +14,11 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-
-from simverse.abstractor.policy import Policy
 from simverse.envs.gym_env.torch_env import observation_batch_to_chw
 from simverse.render_cli import build_render_parser
 
 
-class GymMLPPolicy(Policy):
+class GymMLPPolicy(nn.Module):
     def __init__(self, obs_space: gym.spaces.Box, action_space: gym.spaces.Discrete) -> None:
         super().__init__()
         input_dim = int(np.prod(obs_space.shape))

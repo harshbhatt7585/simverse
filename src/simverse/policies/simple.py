@@ -9,10 +9,8 @@ if __name__ == "__main__" and __package__ is None:
 import torch
 import torch.nn as nn
 
-from simverse.abstractor.policy import Policy
 
-
-class SimplePolicy(Policy):
+class SimplePolicy(nn.Module):
     def __init__(
         self,
         obs_space,

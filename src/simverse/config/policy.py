@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
-from simverse.abstractor.policy import Policy
+import torch.nn as nn
 
 
 @dataclass
 class PolicySpec:
     name: str
-    model: Policy
+    model: nn.Module

@@ -11,9 +11,7 @@ if __package__ is None or __package__.startswith("__main__"):
 
 import numpy as np
 import torch
-
 from simverse.abstractor.live_render_server import LiveRenderServer
-from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import (
     build_adam_optimizers,
     build_ppo_training_config,
@@ -34,7 +32,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-def agent_factory(agent_id: int, policy: Policy, env: SnakeEnv) -> SnakeAgent:
+def agent_factory(agent_id: int, policy: torch.nn.Module, env: SnakeEnv) -> SnakeAgent:
     action_values = np.arange(getattr(env.action_space, "n", 4), dtype=np.int64)
     return SnakeAgent(
         agent_id=agent_id,

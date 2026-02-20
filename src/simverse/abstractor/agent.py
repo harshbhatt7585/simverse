@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 import numpy as np
-
-from simverse.abstractor.policy import Policy
+import torch.nn as nn
 
 
 class SimAgent(ABC):
@@ -12,7 +11,7 @@ class SimAgent(ABC):
         self,
         name: str,
         action_space: np.ndarray,
-        policy: Optional[Policy] = None,
+        policy: Optional[nn.Module] = None,
         **kwargs,
     ) -> None:
         self.name = name
@@ -44,9 +43,9 @@ class SimAgent(ABC):
         pass
 
     @abstractmethod
-    def get_policy(self) -> Policy:
+    def get_policy(self) -> nn.Module | None:
         pass
 
     @abstractmethod
-    def set_policy(self, policy: Policy) -> None:
+    def set_policy(self, policy: nn.Module | None) -> None:
         pass

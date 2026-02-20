@@ -14,9 +14,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-
 from simverse.abstractor.agent import SimAgent
-from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import (
     build_adam_optimizers,
     build_ppo_training_config,
@@ -34,7 +32,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-class GymMLPPolicy(Policy):
+class GymMLPPolicy(nn.Module):
     def __init__(self, obs_space: gym.spaces.Box, action_space: gym.spaces.Discrete) -> None:
         super().__init__()
         input_dim = int(np.prod(obs_space.shape))
@@ -66,7 +64,7 @@ class GymAgent(SimAgent):
         self,
         agent_id: int,
         action_count: int,
-        policy: Optional[Policy] = None,
+        policy: Optional[nn.Module] = None,
         name: str | None = None,
     ) -> None:
         action_space = np.arange(action_count, dtype=np.int64)
@@ -110,7 +108,7 @@ class GymAgent(SimAgent):
         self.policy = policy
 
 
-def agent_factory(agent_id: int, policy: Policy, env: GymEnv) -> GymAgent:
+def agent_factory(agent_id: int, policy: nn.Module, env: GymEnv) -> GymAgent:
     return GymAgent(
         agent_id=agent_id,
         action_count=env.action_space.n,

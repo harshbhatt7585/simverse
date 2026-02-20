@@ -10,7 +10,6 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 import torch
-from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import build_adam_optimizers
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
@@ -23,7 +22,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-def agent_factory(agent_id: int, policy: Policy, env: FarmtilaEnv) -> FarmtilaAgent:
+def agent_factory(agent_id: int, policy: torch.nn.Module, env: FarmtilaEnv) -> FarmtilaAgent:
     return FarmtilaAgent(
         agent_id=agent_id,
         position=(

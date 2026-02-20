@@ -3,11 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-
 from simverse.abstractor.agent import SimAgent
 
 if TYPE_CHECKING:
-    from simverse.abstractor.policy import Policy
+    from torch.nn import Module
 
 DEFAULT_AGENT_ACTIONS = np.arange(6, dtype=np.int64)
 
@@ -18,7 +17,7 @@ class FarmtilaAgent(SimAgent):
         agent_id: int,
         position: tuple[int, int],
         action_space: np.ndarray | None = None,
-        policy: Optional["Policy"] = None,
+        policy: Optional["Module"] = None,
     ) -> None:
         action_space = action_space if action_space is not None else DEFAULT_AGENT_ACTIONS
         super().__init__(name=f"farmer_{agent_id}", action_space=action_space, policy=policy)
