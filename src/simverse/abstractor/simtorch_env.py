@@ -29,7 +29,8 @@ class SimTorchEnv(nn.Module, ABC):
     @abstractmethod
     def step(
         self, actions: torch.Tensor
-    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]: ...
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        NotImplementedError("Subclasses must implement this method")
 
     def get_observation(self) -> Dict[str, torch.Tensor]:
         return self.reset()
