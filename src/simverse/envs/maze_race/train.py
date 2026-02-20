@@ -12,23 +12,17 @@ import numpy as np
 import torch
 from simverse.abstractor.live_render_server import LiveRenderServer
 from simverse.abstractor.train_utils import (
-    build_adam_optimizers,
     build_ppo_training_config,
-    compile_policy_models,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
+    run_ppo_training,
 )
-from simverse.agent.stats import TrainingStats
-from simverse.config.policy import PolicySpec
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
 from simverse.envs.maze_race.env import MazeRaceEnv, create_env
 from simverse.logging_config import training_logger
-from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
-from simverse.simulator import Simulator
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: torch.nn.Module, env: MazeRaceEnv) -> MazeRaceAgent:
@@ -81,24 +75,6 @@ def train(
     )
 
     env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
-
-    policy_specs = [
-        PolicySpec(
-            name=f"maze_race_agent_{agent_id}",
-            model=SimplePolicy(obs_space=env.observation_space, action_space=env.action_space),
-        )
-        for agent_id in range(config.num_agents)
-    ]
-    env.config.policies = policy_specs
-
-    policy_models = compile_policy_models(
-        policy_specs,
-        use_compile=use_compile,
-        device=device,
-    )
-    optimizers = build_adam_optimizers(policy_models, lr=3e-4, device=device)
-
-    stats = TrainingStats()
     training_config = build_ppo_training_config(
         num_agents=config.num_agents,
         num_envs=config.num_envs,
@@ -136,35 +112,23 @@ def train(
         training_logger.info(f"Live render server running at {live_server.url()}")
         frame_sink = live_server.push_frame
 
-    loss_trainer = PPOTrainer(
-        optimizers=optimizers,
-        episodes=training_config["episodes"],
-        training_epochs=training_config["training_epochs"],
-        clip_epsilon=training_config["clip_epsilon"],
-        gamma=training_config["gamma"],
-        gae_lambda=training_config["gae_lambda"],
-        stats=stats,
-        config=training_config,
-        project_name=DEFAULT_WANDB_PROJECT,
-        run_name="ppo-maze-race",
-        episode_save_dir="recordings/maze_race",
-        frame_sink=frame_sink,
-        device=training_config["device"],
-        batch_size=training_config["batch_size"],
-        buffer_size=training_config["buffer_size"],
-        dtype=training_config["dtype"],
-        use_wandb=use_wandb,
-    )
-
-    simulator = Simulator(
-        env=env,
-        num_agents=config.num_agents,
-        policies=policy_models,
-        loss_trainer=loss_trainer,
-        agent_factory=agent_factory,
-    )
     try:
-        simulator.train(title="Maze Race Training")
+        run_ppo_training(
+            env=env,
+            training_config=training_config,
+            agent_factory=agent_factory,
+            policy_factory=lambda obs_space, action_space: SimplePolicy(
+                obs_space=obs_space,
+                action_space=action_space,
+            ),
+            title="Maze Race Training",
+            run_name="ppo-maze-race",
+            episode_save_dir="recordings/maze_race",
+            use_wandb=use_wandb,
+            use_compile=use_compile,
+            policy_name_prefix="maze_race_agent",
+            frame_sink=frame_sink,
+        )
     finally:
         if live_server is not None:
             live_server.stop()
