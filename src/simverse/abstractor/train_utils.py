@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 
+from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
+from simverse.losses.ppo import PPOTrainer
+from simverse.simulator import Simulator
+from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def resolve_torch_device(*, prefer_mps: bool = True) -> str:
@@ -99,3 +103,63 @@ def build_ppo_training_config(
     if extras:
         config.update(dict(extras))
     return config
+
+
+def run_ppo_training(
+    *,
+    env: Any,
+    training_config: Mapping[str, Any],
+    agent_factory: Callable[[int, torch.nn.Module, Any], Any],
+    policy_factory: Callable[[Any, Any], torch.nn.Module],
+    title: str,
+    run_name: str = "ppo-training",
+    episode_save_dir: str | None = None,
+    use_wandb: bool = True,
+    project_name: str = DEFAULT_WANDB_PROJECT,
+    policy_name_prefix: str = "agent",
+) -> None:
+    num_agents = int(training_config["num_agents"])
+    policy_specs = [
+        PolicySpec(
+            name=f"{policy_name_prefix}_{agent_id}",
+            model=policy_factory(env.observation_space, env.action_space),
+        )
+        for agent_id in range(num_agents)
+    ]
+    if hasattr(env, "config"):
+        env.config.policies = policy_specs
+
+    policy_models = [policy_spec.model for policy_spec in policy_specs]
+    optimizers = build_adam_optimizers(
+        policy_models,
+        lr=float(training_config["lr"]),
+        device=str(training_config["device"]),
+    )
+
+    loss_trainer = PPOTrainer(
+        optimizers=optimizers,
+        episodes=int(training_config["episodes"]),
+        training_epochs=int(training_config["training_epochs"]),
+        clip_epsilon=float(training_config["clip_epsilon"]),
+        gamma=float(training_config["gamma"]),
+        gae_lambda=float(training_config["gae_lambda"]),
+        stats=TrainingStats(),
+        config=dict(training_config),
+        project_name=project_name,
+        run_name=run_name,
+        episode_save_dir=episode_save_dir,
+        device=str(training_config["device"]),
+        batch_size=int(training_config["batch_size"]),
+        buffer_size=int(training_config["buffer_size"]),
+        dtype=training_config["dtype"],
+        use_wandb=use_wandb,
+    )
+
+    simulator = Simulator(
+        env=env,
+        num_agents=num_agents,
+        policies=policy_models,
+        loss_trainer=loss_trainer,
+        agent_factory=agent_factory,
+    )
+    simulator.train(title=title)

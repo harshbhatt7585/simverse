@@ -10,16 +10,11 @@ if __package__ is None or __package__.startswith("__main__"):
     sys.path.insert(0, str(_src))
 
 import torch
-from simverse.abstractor.train_utils import build_adam_optimizers
-from simverse.agent.stats import TrainingStats
-from simverse.config.policy import PolicySpec
+from simverse.abstractor.train_utils import run_ppo_training
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig, build_training_config
 from simverse.envs.farmtila.env import FarmtilaEnv, create_env
-from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
-from simverse.simulator import Simulator
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
 def agent_factory(agent_id: int, policy: torch.nn.Module, env: FarmtilaEnv) -> FarmtilaAgent:
@@ -79,58 +74,20 @@ def train(use_wandb: bool = True):
         device=training_config["device"],
         dtype=training_config["dtype"],
     )
-    policy_specs = [
-        PolicySpec(
-            name=f"simple_agent_{agent_id}",
-            model=SimplePolicy(
-                obs_space=env.observation_space,
-                action_space=env.action_space,
-            ),
-        )
-        for agent_id in range(training_config["num_agents"])
-    ]
-    env.config.policies = policy_specs
-
-    policy_models = [ps.model for ps in env.config.policies]
-    optimizers = build_adam_optimizers(
-        policy_models,
-        lr=training_config["lr"],
-        device=training_config["device"],
-    )
-
-    # Create stats tracker
-    stats = TrainingStats()
-
-    # Create trainer with config for logging
-    loss_trainer = PPOTrainer(
-        optimizers=optimizers,
-        episodes=training_config["episodes"],
-        training_epochs=training_config["training_epochs"],
-        clip_epsilon=training_config["clip_epsilon"],
-        gamma=training_config["gamma"],
-        gae_lambda=training_config["gae_lambda"],
-        stats=stats,
-        config=training_config,
-        project_name=DEFAULT_WANDB_PROJECT,
+    run_ppo_training(
+        env=env,
+        training_config=training_config,
+        agent_factory=agent_factory,
+        policy_factory=lambda obs_space, action_space: SimplePolicy(
+            obs_space=obs_space,
+            action_space=action_space,
+        ),
+        title="Farmtila Training",
         run_name="ppo-training",
         episode_save_dir="recordings/farmtila",
-        device=training_config["device"],
-        batch_size=training_config["batch_size"],
-        buffer_size=training_config["buffer_size"],
-        dtype=training_config["dtype"],
         use_wandb=use_wandb,
+        policy_name_prefix="simple_agent",
     )
-
-    simulator = Simulator(
-        env=env,
-        num_agents=training_config["num_agents"],
-        policies=policy_models,
-        loss_trainer=loss_trainer,
-        agent_factory=agent_factory,
-    )
-
-    # Start training
-    simulator.train(title="Farmtila Training")
 
 
 if __name__ == "__main__":
