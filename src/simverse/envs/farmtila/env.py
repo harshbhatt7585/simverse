@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
 
 import gymnasium as gym
 import numpy as np
+import torch
 
 from simverse.abstractor.simenv import SimEnv
 from simverse.abstractor.simvector_env import SimVectorEnv
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
+
+if TYPE_CHECKING:
+    from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
 
 
 class FarmtilaEnv(SimEnv):
@@ -376,3 +380,19 @@ class FarmtillaVectorizedEnv(SimVectorEnv):
                     )
                 )
             env.assign_agents(env_agents)
+
+
+def create_env(
+    config: FarmtilaConfig,
+    *,
+    num_envs: int | None = None,
+    device: str | torch.device = "cpu",
+    dtype: torch.dtype = torch.float32,
+) -> FarmtilaEnv | FarmtilaTorchEnv:
+    resolved_envs = max(1, int(num_envs or config.num_envs))
+    if resolved_envs == 1:
+        return FarmtilaEnv(config=config)
+
+    from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
+
+    return FarmtilaTorchEnv(config=config, num_envs=resolved_envs, device=device, dtype=dtype)
