@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -14,12 +13,20 @@ import numpy as np
 import torch
 
 from simverse.abstractor.policy import Policy
+from simverse.abstractor.train_utils import (
+    build_adam_optimizers,
+    build_ppo_training_config,
+    compile_policy_models,
+    configure_torch_backend,
+    resolve_rollout_dtype,
+    resolve_torch_device,
+)
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
+from simverse.envs.snake.env import SnakeEnv, create_env
 from simverse.envs.snake.live_server import LiveRenderServer
-from simverse.envs.snake.torch_env import SnakeTorchEnv
 from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
@@ -27,15 +34,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-def _resolve_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-def agent_factory(agent_id: int, policy: Policy, env: SnakeTorchEnv) -> SnakeAgent:
+def agent_factory(agent_id: int, policy: Policy, env: SnakeEnv) -> SnakeAgent:
     action_values = np.arange(getattr(env.action_space, "n", 4), dtype=np.int64)
     return SnakeAgent(
         agent_id=agent_id,
@@ -98,14 +97,9 @@ def train(
         np.random.seed(int(seed))
         torch.manual_seed(int(seed))
 
-    device = _resolve_device()
-    dtype = torch.float16 if device == "cuda" else torch.bfloat16
-
-    if device == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        torch.set_float32_matmul_precision("high")
+    device = resolve_torch_device(prefer_mps=True)
+    dtype = resolve_rollout_dtype(device, cpu_dtype=torch.bfloat16)
+    configure_torch_backend(device)
 
     config = SnakeConfig(
         width=max(5, int(width)),
@@ -124,12 +118,7 @@ def train(
         policies=[],
     )
 
-    env = SnakeTorchEnv(
-        config=config,
-        num_envs=config.num_envs,
-        device=device,
-        dtype=dtype,
-    )
+    env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
 
     policy_specs = [
         PolicySpec(
@@ -142,38 +131,31 @@ def train(
     ]
     env.config.policies = policy_specs
 
-    policy_models = [ps.model for ps in policy_specs]
-    if use_compile and hasattr(torch, "compile") and device == "cuda":
-        policy_models = [torch.compile(model, mode="max-autotune") for model in policy_models]
-
-    adam_kwargs: dict[str, object] = {}
-    if "fused" in inspect.signature(torch.optim.Adam).parameters and device == "cuda":
-        adam_kwargs["fused"] = True
-    optimizers = {
-        agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=lr, **adam_kwargs)
-        for agent_id in range(config.num_agents)
-    }
+    policy_models = compile_policy_models(
+        policy_specs,
+        use_compile=use_compile,
+        device=device,
+    )
+    optimizers = build_adam_optimizers(policy_models, lr=lr, device=device)
 
     stats = TrainingStats()
-    training_config = {
-        "env": "snake",
-        "width": config.width,
-        "height": config.height,
-        "num_agents": config.num_agents,
-        "num_envs": config.num_envs,
-        "max_steps": config.max_steps,
-        "episodes": int(episodes),
-        "training_epochs": max(1, int(training_epochs)),
-        "clip_epsilon": 0.2,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "lr": lr,
-        "batch_size": config.num_envs * 8,
-        "buffer_size": config.num_envs * config.num_agents * 16,
-        "device": device,
-        "dtype": dtype,
-        "torch_fastpath": True,
-    }
+    training_config = build_ppo_training_config(
+        num_agents=config.num_agents,
+        num_envs=config.num_envs,
+        max_steps=config.max_steps,
+        episodes=int(episodes),
+        training_epochs=max(1, int(training_epochs)),
+        lr=lr,
+        batch_size=config.num_envs * 8,
+        buffer_size=config.num_envs * config.num_agents * 16,
+        device=device,
+        dtype=dtype,
+        extras={
+            "env": "snake",
+            "width": config.width,
+            "height": config.height,
+        },
+    )
 
     run_name = f"snake-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     live_server = None

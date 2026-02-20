@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import sys
 from pathlib import Path
 
@@ -13,12 +12,20 @@ import numpy as np
 import torch
 
 from simverse.abstractor.policy import Policy
+from simverse.abstractor.train_utils import (
+    build_adam_optimizers,
+    build_ppo_training_config,
+    compile_policy_models,
+    configure_torch_backend,
+    resolve_rollout_dtype,
+    resolve_torch_device,
+)
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
+from simverse.envs.maze_race.env import MazeRaceEnv, create_env
 from simverse.envs.maze_race.live_server import LiveRenderServer
-from simverse.envs.maze_race.torch_env import MazeRaceTorchEnv
 from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
@@ -26,7 +33,7 @@ from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 
-def agent_factory(agent_id: int, policy: Policy, env: MazeRaceTorchEnv) -> MazeRaceAgent:
+def agent_factory(agent_id: int, policy: Policy, env: MazeRaceEnv) -> MazeRaceAgent:
     action_values = np.arange(getattr(env.action_space, "n", 5), dtype=np.int64)
     return MazeRaceAgent(
         agent_id=agent_id,
@@ -59,14 +66,9 @@ def train(
     render_port: int = 8770,
     render_stride: int = 1,
 ) -> None:
-    device = "cuda" if torch.cuda.is_available() else "mps"
-    dtype = torch.float16 if device == "cuda" else torch.bfloat16
-
-    if device == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        torch.set_float32_matmul_precision("high")
+    device = resolve_torch_device(prefer_mps=True)
+    dtype = resolve_rollout_dtype(device, cpu_dtype=torch.bfloat16)
+    configure_torch_backend(device)
 
     config = MazeRaceConfig(
         width=7,
@@ -80,12 +82,7 @@ def train(
         policies=[],
     )
 
-    env = MazeRaceTorchEnv(
-        config=config,
-        num_envs=config.num_envs,
-        device=device,
-        dtype=dtype,
-    )
+    env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
 
     policy_specs = [
         PolicySpec(
@@ -96,35 +93,26 @@ def train(
     ]
     env.config.policies = policy_specs
 
-    policy_models = [ps.model for ps in policy_specs]
-    if use_compile and hasattr(torch, "compile") and device == "cuda":
-        policy_models = [torch.compile(model, mode="max-autotune") for model in policy_models]
-
-    adam_kwargs: dict[str, object] = {}
-    if "fused" in inspect.signature(torch.optim.Adam).parameters and device == "cuda":
-        adam_kwargs["fused"] = True
-    optimizers = {
-        agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=3e-4, **adam_kwargs)
-        for agent_id in range(config.num_agents)
-    }
+    policy_models = compile_policy_models(
+        policy_specs,
+        use_compile=use_compile,
+        device=device,
+    )
+    optimizers = build_adam_optimizers(policy_models, lr=3e-4, device=device)
 
     stats = TrainingStats()
-    training_config = {
-        "num_agents": config.num_agents,
-        "num_envs": config.num_envs,
-        "max_steps": config.max_steps,
-        "episodes": int(episodes),
-        "training_epochs": 1,
-        "clip_epsilon": 0.2,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "lr": 3e-4,
-        "batch_size": config.num_envs * 2,
-        "buffer_size": config.num_envs * config.num_agents * 8,
-        "device": device,
-        "dtype": dtype,
-        "torch_fastpath": True,
-    }
+    training_config = build_ppo_training_config(
+        num_agents=config.num_agents,
+        num_envs=config.num_envs,
+        max_steps=config.max_steps,
+        episodes=int(episodes),
+        training_epochs=1,
+        lr=3e-4,
+        batch_size=config.num_envs * 2,
+        buffer_size=config.num_envs * config.num_agents * 8,
+        device=device,
+        dtype=dtype,
+    )
 
     live_server = None
     frame_sink = None

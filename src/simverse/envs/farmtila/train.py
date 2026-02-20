@@ -12,12 +12,12 @@ if __package__ is None or __package__.startswith("__main__"):
 import torch
 
 from simverse.abstractor.policy import Policy
+from simverse.abstractor.train_utils import build_adam_optimizers
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
-from simverse.envs.farmtila.env import FarmtilaEnv
-from simverse.envs.farmtila.torch_env import FarmtilaTorchEnv
+from simverse.envs.farmtila.env import FarmtilaEnv, create_env
 from simverse.envs.farmtila.training_config import build_training_config
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
@@ -76,15 +76,12 @@ def train(use_wandb: bool = True):
         seeds_per_spawn=10,
         policies=[],
     )
-    if training_config["num_envs"] > 1:
-        env = FarmtilaTorchEnv(
-            config=config,
-            num_envs=training_config["num_envs"],
-            device=training_config["device"],
-            dtype=training_config["dtype"],
-        )
-    else:
-        env = FarmtilaEnv(config=config)
+    env = create_env(
+        config=config,
+        num_envs=training_config["num_envs"],
+        device=training_config["device"],
+        dtype=training_config["dtype"],
+    )
     policy_specs = [
         PolicySpec(
             name=f"simple_agent_{agent_id}",
@@ -98,10 +95,11 @@ def train(use_wandb: bool = True):
     env.config.policies = policy_specs
 
     policy_models = [ps.model for ps in env.config.policies]
-    optimizers = {
-        agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=training_config["lr"])
-        for agent_id in range(training_config["num_agents"])
-    }
+    optimizers = build_adam_optimizers(
+        policy_models,
+        lr=training_config["lr"],
+        device=training_config["device"],
+    )
 
     # Create stats tracker
     stats = TrainingStats()

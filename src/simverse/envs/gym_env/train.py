@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,9 +17,18 @@ import torch.nn as nn
 
 from simverse.abstractor.agent import SimAgent
 from simverse.abstractor.policy import Policy
+from simverse.abstractor.train_utils import (
+    build_adam_optimizers,
+    build_ppo_training_config,
+    compile_policy_models,
+    configure_torch_backend,
+    resolve_rollout_dtype,
+    resolve_torch_device,
+)
 from simverse.agent.stats import TrainingStats
 from simverse.config.policy import PolicySpec
-from simverse.envs.gym_env.torch_env import GymTorchConfig, GymTorchEnv, observation_batch_to_chw
+from simverse.envs.gym_env.env import GymEnv, create_env
+from simverse.envs.gym_env.torch_env import GymTorchConfig, observation_batch_to_chw
 from simverse.losses.ppo import PPOTrainer
 from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
@@ -102,7 +110,7 @@ class GymAgent(SimAgent):
         self.policy = policy
 
 
-def agent_factory(agent_id: int, policy: Policy, env: GymTorchEnv) -> GymAgent:
+def agent_factory(agent_id: int, policy: Policy, env: GymEnv) -> GymAgent:
     return GymAgent(
         agent_id=agent_id,
         action_count=env.action_space.n,
@@ -230,14 +238,9 @@ def train(
         np.random.seed(int(seed))
         torch.manual_seed(int(seed))
 
-    device = "cuda" if torch.cuda.is_available() else "mps"
-    dtype = torch.float16 if device == "cuda" else torch.bfloat16
-
-    if device == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-        torch.set_float32_matmul_precision("high")
+    device = resolve_torch_device(prefer_mps=True)
+    dtype = resolve_rollout_dtype(device, cpu_dtype=torch.bfloat16)
+    configure_torch_backend(device)
 
     config = GymTorchConfig(
         env_id=env_id,
@@ -248,7 +251,7 @@ def train(
         policies=[],
     )
 
-    env = GymTorchEnv(config=config, num_envs=config.num_envs, device=device, dtype=dtype)
+    env = create_env(config, num_envs=config.num_envs, device=device, dtype=dtype)
 
     policy_specs = [
         PolicySpec(
@@ -258,36 +261,27 @@ def train(
     ]
     env.config.policies = policy_specs
 
-    policy_models = [ps.model for ps in policy_specs]
-    if use_compile and hasattr(torch, "compile") and device == "cuda":
-        policy_models = [torch.compile(model, mode="max-autotune") for model in policy_models]
-
-    adam_kwargs: dict[str, object] = {}
-    if "fused" in inspect.signature(torch.optim.Adam).parameters and device == "cuda":
-        adam_kwargs["fused"] = True
-    optimizers = {
-        agent_id: torch.optim.Adam(policy_models[agent_id].parameters(), lr=lr, **adam_kwargs)
-        for agent_id in range(config.num_agents)
-    }
+    policy_models = compile_policy_models(
+        policy_specs,
+        use_compile=use_compile,
+        device=device,
+    )
+    optimizers = build_adam_optimizers(policy_models, lr=lr, device=device)
 
     stats = TrainingStats()
-    training_config = {
-        "env_id": env_id,
-        "num_agents": config.num_agents,
-        "num_envs": config.num_envs,
-        "max_steps": config.max_steps,
-        "episodes": int(episodes),
-        "training_epochs": 1,
-        "clip_epsilon": 0.2,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "lr": lr,
-        "batch_size": config.num_envs * 8,
-        "buffer_size": config.num_envs * config.num_agents * 16,
-        "device": device,
-        "dtype": dtype,
-        "torch_fastpath": True,
-    }
+    training_config = build_ppo_training_config(
+        num_agents=config.num_agents,
+        num_envs=config.num_envs,
+        max_steps=config.max_steps,
+        episodes=int(episodes),
+        training_epochs=1,
+        lr=lr,
+        batch_size=config.num_envs * 8,
+        buffer_size=config.num_envs * config.num_agents * 16,
+        device=device,
+        dtype=dtype,
+        extras={"env_id": env_id},
+    )
 
     resolved_project_name = DEFAULT_WANDB_PROJECT
     resolved_run_name = (
