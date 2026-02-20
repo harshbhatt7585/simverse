@@ -12,6 +12,7 @@ if __package__ is None or __package__.startswith("__main__"):
 import numpy as np
 import torch
 
+from simverse.abstractor.live_render_server import LiveRenderServer
 from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import (
     build_adam_optimizers,
@@ -26,7 +27,6 @@ from simverse.config.policy import PolicySpec
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
 from simverse.envs.snake.env import SnakeEnv, create_env
-from simverse.envs.snake.live_server import LiveRenderServer
 from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
@@ -163,6 +163,7 @@ def train(
     if render_server:
         live_server = LiveRenderServer(
             output_path="recordings/snake/live.jsonl",
+            game="snake",
             host=render_host,
             port=render_port,
             title="Snake Live",

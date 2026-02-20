@@ -11,6 +11,7 @@ if __package__ is None or __package__.startswith("__main__"):
 import numpy as np
 import torch
 
+from simverse.abstractor.live_render_server import LiveRenderServer
 from simverse.abstractor.policy import Policy
 from simverse.abstractor.train_utils import (
     build_adam_optimizers,
@@ -25,7 +26,6 @@ from simverse.config.policy import PolicySpec
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
 from simverse.envs.maze_race.env import MazeRaceEnv, create_env
-from simverse.envs.maze_race.live_server import LiveRenderServer
 from simverse.logging_config import training_logger
 from simverse.losses.ppo import PPOTrainer
 from simverse.policies.simple import SimplePolicy
@@ -119,6 +119,7 @@ def train(
     if render_server:
         live_server = LiveRenderServer(
             output_path="recordings/maze_race/live.jsonl",
+            game="maze",
             host=render_host,
             port=render_port,
             title="Maze Race Live",

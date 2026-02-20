@@ -20,24 +20,24 @@ def _json_default(value: Any) -> Any:
 
 
 class LiveRenderServer:
-    """
-    Compatibility client that publishes live frames/metadata to central FastAPI routes.
-    """
+    """Publish live metadata/frames to central FastAPI routes."""
 
     def __init__(
         self,
+        *,
         output_path: str,
+        game: str,
         host: str = "127.0.0.1",
         port: int = 8770,
-        title: str = "Maze Race Live",
+        title: str = "Live",
         frame_stride: int = 1,
     ) -> None:
         self.output_path = output_path
+        self.game = game
         self.host = host
         self.port = int(port)
         self.title = title
         self.frame_stride = max(1, int(frame_stride))
-        self.game = "maze"
 
         self._frame_count = 0
         self._running = False
@@ -65,6 +65,7 @@ class LiveRenderServer:
             self._next_retry_at = 0.0
             return True
         except (error.URLError, TimeoutError, OSError, ValueError) as exc:
+            # Avoid spamming logs inside hot frame loops.
             if now >= self._next_log_at:
                 logger.warning("Live render publish failed: %s", exc)
                 self._next_log_at = now + 5.0
