@@ -14,9 +14,8 @@ if __package__ is None or __package__.startswith("__main__"):
 import numpy as np
 import pygame
 import torch
-
 from simverse.envs.snake.config import SnakeConfig
-from simverse.envs.snake.torch_env import SnakeTorchEnv
+from simverse.envs.snake.env import SnakeTorchEnv
 from simverse.policies.simple import SimplePolicy
 from simverse.render_cli import build_render_parser
 

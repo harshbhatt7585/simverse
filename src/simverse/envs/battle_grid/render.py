@@ -11,9 +11,8 @@ if __package__ is None or __package__.startswith("__main__"):
 
 import pygame
 import torch
-
 from simverse.envs.battle_grid.config import BattleGridConfig
-from simverse.envs.battle_grid.torch_env import BattleGridTorchEnv
+from simverse.envs.battle_grid.env import BattleGridTorchEnv
 from simverse.policies.simple import SimplePolicy
 from simverse.render_cli import build_render_parser
 

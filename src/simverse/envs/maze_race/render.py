@@ -14,9 +14,8 @@ if __name__ == "__main__" and __package__ is None:
 import numpy as np
 import pygame
 import torch
-
 from simverse.envs.maze_race.config import MazeRaceConfig
-from simverse.envs.maze_race.torch_env import MazeRaceTorchEnv
+from simverse.envs.maze_race.env import MazeRaceTorchEnv
 from simverse.render_cli import build_render_parser
 
 

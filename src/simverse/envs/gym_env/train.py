@@ -16,8 +16,7 @@ from simverse.abstractor.train_utils import (
     resolve_torch_device,
     run_ppo_training,
 )
-from simverse.envs.gym_env.env import GymEnv, create_env
-from simverse.envs.gym_env.torch_env import GymTorchConfig, observation_batch_to_chw
+from simverse.envs.gym_env.env import GymEnv, GymTorchConfig, create_env, observation_batch_to_chw
 
 
 class GymMLPPolicy(nn.Module):
