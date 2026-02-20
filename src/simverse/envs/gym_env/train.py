@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-if __package__ is None or __package__.startswith("__main__"):
-    _src = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(_src))
 
 import gymnasium as gym
 import numpy as np
@@ -197,22 +191,6 @@ def _record_policy_video(
         video_env.close()
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train a Gymnasium env with Simverse PPO")
-    parser.add_argument("--env-id", type=str, default="CartPole-v1", help="Gymnasium env id")
-    parser.add_argument("--num-envs", type=int, default=512, help="Parallel environment count")
-    parser.add_argument("--episodes", type=int, default=120, help="Training episodes")
-    parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
-    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
-    parser.add_argument("--wandb", choices=["on", "off"], default="off")
-    parser.add_argument("--compile", choices=["on", "off"], default="on")
-    parser.add_argument("--record-video", choices=["on", "off"], default="off")
-    parser.add_argument("--video-episodes", type=int, default=1)
-    parser.add_argument("--video-dir", type=str, default="recordings/gym_env/videos")
-    parser.add_argument("--seed", type=int, default=None)
-    return parser.parse_args()
-
-
 def train(
     env_id: str = "CartPole-v1",
     num_envs: int = 512,
@@ -295,17 +273,4 @@ def train(
 
 
 if __name__ == "__main__":
-    cli_args = parse_args()
-    train(
-        env_id=cli_args.env_id,
-        num_envs=cli_args.num_envs,
-        episodes=cli_args.episodes,
-        max_steps=cli_args.max_steps,
-        lr=cli_args.lr,
-        use_wandb=cli_args.wandb == "on",
-        use_compile=cli_args.compile == "on",
-        seed=cli_args.seed,
-        record_video=cli_args.record_video == "on",
-        video_episodes=cli_args.video_episodes,
-        video_dir=cli_args.video_dir,
-    )
+    train()

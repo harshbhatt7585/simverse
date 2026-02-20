@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-import argparse
 import random
-import sys
-from pathlib import Path
-
-if __package__ is None or __package__.startswith("__main__"):
-    _src = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(_src))
 
 import torch
 from simverse.abstractor.train_utils import run_ppo_training
@@ -27,18 +20,6 @@ def agent_factory(agent_id: int, policy: torch.nn.Module, env: FarmtilaEnv) -> F
         action_space=env.action_space,
         policy=policy,
     )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Farmtila PPO agents")
-    parser.add_argument(
-        "--wandb",
-        choices=["on", "off"],
-        default="on",
-        help="Enable or disable Weights & Biases logging",
-    )
-    parser.add_argument("--compile", choices=["on", "off"], default="on")
-    return parser.parse_args()
 
 
 def train(use_wandb: bool = True, use_compile: bool = True):
@@ -93,8 +74,4 @@ def train(use_wandb: bool = True, use_compile: bool = True):
 
 
 if __name__ == "__main__":
-    cli_args = parse_args()
-    train(
-        use_wandb=cli_args.wandb == "on",
-        use_compile=cli_args.compile == "on",
-    )
+    train()

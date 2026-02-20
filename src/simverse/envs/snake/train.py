@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-import argparse
-import sys
 from datetime import datetime
-from pathlib import Path
-
-if __package__ is None or __package__.startswith("__main__"):
-    _src = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(_src))
 
 import numpy as np
 import torch
@@ -34,32 +27,6 @@ def agent_factory(agent_id: int, policy: torch.nn.Module, env: SnakeEnv) -> Snak
         policy=policy,
         name=f"snake_agent_{agent_id}",
     )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Snake PPO agent")
-    parser.add_argument("--width", type=int, default=15, help="Grid width")
-    parser.add_argument("--height", type=int, default=15, help="Grid height")
-    parser.add_argument("--num-envs", type=int, default=512, help="Parallel environment count")
-    parser.add_argument("--episodes", type=int, default=200, help="Training episodes")
-    parser.add_argument("--max-steps", type=int, default=300, help="Max steps per episode")
-    parser.add_argument("--init-length", type=int, default=3, help="Initial snake length")
-    parser.add_argument("--food-reward", type=float, default=5.0)
-    parser.add_argument("--crash-penalty", type=float, default=1.0)
-    parser.add_argument("--distance-reward-scale", type=float, default=0.01)
-    parser.add_argument("--survival-bonus", type=float, default=1.0)
-    parser.add_argument("--survival-bonus-every", type=int, default=10)
-    parser.add_argument("--training-epochs", type=int, default=3)
-    parser.add_argument("--auto-reset-done-envs", choices=["on", "off"], default="on")
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--wandb", choices=["on", "off"], default="off")
-    parser.add_argument("--compile", choices=["on", "off"], default="on")
-    parser.add_argument("--render-server", choices=["on", "off"], default="on")
-    parser.add_argument("--render-host", type=str, default="127.0.0.1")
-    parser.add_argument("--render-port", type=int, default=8770)
-    parser.add_argument("--render-stride", type=int, default=1, help="Stream every Nth frame")
-    return parser.parse_args()
 
 
 def train(
@@ -177,27 +144,4 @@ def train(
 
 
 if __name__ == "__main__":
-    cli_args = parse_args()
-    train(
-        width=cli_args.width,
-        height=cli_args.height,
-        num_envs=cli_args.num_envs,
-        episodes=cli_args.episodes,
-        max_steps=cli_args.max_steps,
-        init_length=cli_args.init_length,
-        food_reward=cli_args.food_reward,
-        crash_penalty=cli_args.crash_penalty,
-        distance_reward_scale=cli_args.distance_reward_scale,
-        survival_bonus=cli_args.survival_bonus,
-        survival_bonus_every=cli_args.survival_bonus_every,
-        training_epochs=cli_args.training_epochs,
-        auto_reset_done_envs=cli_args.auto_reset_done_envs == "on",
-        lr=cli_args.lr,
-        seed=cli_args.seed,
-        use_wandb=cli_args.wandb == "on",
-        use_compile=cli_args.compile == "on",
-        render_server=cli_args.render_server == "on",
-        render_host=cli_args.render_host,
-        render_port=cli_args.render_port,
-        render_stride=cli_args.render_stride,
-    )
+    train()

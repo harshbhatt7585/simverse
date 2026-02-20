@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-import argparse
-import sys
-from pathlib import Path
-
-if __package__ is None or __package__.startswith("__main__"):
-    _src = Path(__file__).resolve().parents[3]
-    sys.path.insert(0, str(_src))
-
 import numpy as np
 import torch
 from simverse.abstractor.live_render_server import LiveRenderServer
@@ -33,19 +25,6 @@ def agent_factory(agent_id: int, policy: torch.nn.Module, env: MazeRaceEnv) -> M
         policy=policy,
         name=f"maze_race_agent_{agent_id}",
     )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Maze Race PPO agents")
-    parser.add_argument("--num-envs", type=int, default=512, help="Parallel environment count")
-    parser.add_argument("--episodes", type=int, default=150, help="Training episodes")
-    parser.add_argument("--wandb", choices=["on", "off"], default="off")
-    parser.add_argument("--compile", choices=["on", "off"], default="on")
-    parser.add_argument("--render-server", choices=["on", "off"], default="on")
-    parser.add_argument("--render-host", type=str, default="127.0.0.1")
-    parser.add_argument("--render-port", type=int, default=8770)
-    parser.add_argument("--render-stride", type=int, default=1, help="Stream every Nth frame")
-    return parser.parse_args()
 
 
 def train(
@@ -135,14 +114,4 @@ def train(
 
 
 if __name__ == "__main__":
-    cli_args = parse_args()
-    train(
-        num_envs=cli_args.num_envs,
-        episodes=cli_args.episodes,
-        use_wandb=cli_args.wandb == "on",
-        use_compile=cli_args.compile == "on",
-        render_server=cli_args.render_server == "on",
-        render_host=cli_args.render_host,
-        render_port=cli_args.render_port,
-        render_stride=cli_args.render_stride,
-    )
+    train()
