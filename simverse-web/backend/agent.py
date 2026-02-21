@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -52,15 +51,10 @@ class SimpleTerminalAgent:
             "You are chatting with the user in a terminal."
         )
 
-    def _build_client(self) -> Any:
-        if OpenAI is None:
-            return None
+    def _build_client(self) -> OpenAI | None:
         if not os.getenv("OPENAI_API_KEY"):
             return None
-        try:
-            return OpenAI()
-        except Exception:
-            return None
+        return OpenAI()
 
     def handle_user_message(self, user_input: str) -> AgentTurn:
         text = user_input.strip()
@@ -78,21 +72,18 @@ class SimpleTerminalAgent:
         messages = [{"role": "system", "content": create_system_prompt(self.name)}] + self.history[
             -20:
         ]
-        try:
-            response = self.client.responses.create(
-                model=self.model,
-                input=messages,
-                reasoning={"effort": "minimal"},
-                max_output_tokens=600,
-            )
-            reply = (getattr(response, "output_text", "") or "").strip()
-            if not reply:
-                reply = "I could not generate a response. Please try again."
-                status = "error"
-            else:
-                status = "ok"
-        except Exception as exc:
-            return AgentTurn(status="error", reply=f"Model request failed: {exc}")
+        response = self.client.responses.create(
+            model=self.model,
+            input=messages,
+            reasoning={"effort": "minimal"},
+            max_output_tokens=600,
+        )
+        reply = (getattr(response, "output_text", "") or "").strip()
+        if not reply:
+            reply = "I could not generate a response. Please try again."
+            status = "error"
+        else:
+            status = "ok"
 
         self.history.append({"role": "assistant", "content": reply})
         return AgentTurn(status=status, reply=reply)
@@ -108,11 +99,7 @@ def run_cli() -> None:
     print("Type `exit` to stop.\n")
 
     while True:
-        try:
-            user_input = input("You: ").strip()
-        except EOFError:
-            print("\nExiting.")
-            break
+        user_input = input("You: ").strip()
 
         if user_input.lower() in {"exit", "quit"}:
             print("Exiting.")
