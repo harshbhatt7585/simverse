@@ -12,11 +12,6 @@ from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any
 
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover
-    OpenAI = None  # type: ignore[assignment]
-
 
 def _load_env_from_file(path: Path) -> None:
     if not path.exists():
@@ -63,51 +58,38 @@ class ClientResponse:
 class PersonalClient:
     def __init__(
         self,
-        provider: str = "custom",
-        *,
-        custom_api_url: str = "http://127.0.0.1:9000/codex",
-        custom_timeout_s: int = 120,
+        custom_api_url: str = "http://127.0.0.1:8001/codex",
+        custom_timeout_s: int = 600,
+        use_conversation_endpoint: bool = False,
+        conversation_id: str | None = None,
     ) -> None:
-        normalized = provider.strip().lower()
-        self.provider = normalized if normalized in {"openai", "custom"} else "custom"
         self.custom_api_url = custom_api_url
         self.custom_timeout_s = int(custom_timeout_s)
-        self.openai_client = OpenAI() if self.provider == "openai" else None
+        self.use_conversation_endpoint = bool(use_conversation_endpoint)
+        self.conversation_id = conversation_id
 
     def create_response(
         self,
         *,
-        model: str,
         input_payload: list[dict[str, Any]],
-        max_output_tokens: int,
     ) -> ClientResponse:
-        if self.provider == "openai":
-            if self.openai_client is None:
-                raise RuntimeError("OpenAI provider selected but openai client is unavailable")
-            response = self.openai_client.responses.create(
-                model=model,
-                input=input_payload,
-                reasoning={"effort": "minimal"},
-                max_output_tokens=max_output_tokens,
-            )
-            return ClientResponse(output_text=(getattr(response, "output_text", "") or ""))
         return self._create_custom_response(input_payload=input_payload)
 
     def _create_custom_response(self, *, input_payload: list[dict[str, Any]]) -> ClientResponse:
         prompt_parts: list[str] = []
         for message in input_payload:
-            role = str(message.get("role", "user"))
             content = str(message.get("content", ""))
-            prompt_parts.append(f"[{role}]\\n{content}")
+            if content.strip():
+                prompt_parts.append(content)
         prompt = "\n\n".join(prompt_parts)
 
         body = {
             "prompt": prompt,
             "timeout_s": self.custom_timeout_s,
             "include_events": False,
-            "include_raw_output": True,
-            "extra_args": ["--skip-git-repo-check"],
         }
+        if self.use_conversation_endpoint and self.conversation_id:
+            body["conversation_id"] = self.conversation_id
         candidate_urls = self._candidate_custom_urls(self.custom_api_url)
         last_error: Exception | None = None
         payload_text: str | None = None
@@ -142,12 +124,19 @@ class PersonalClient:
         base = configured_url.rstrip("/")
         if not base:
             return [
-                "http://0.0.0.0:8001/codex",
+                "http://127.0.0.1:8001/codex",
             ]
+        if self.use_conversation_endpoint:
+            if base.endswith("/codex/conv"):
+                parent = base[: -len("/codex/conv")] or base
+                return [base, f"{parent}/codex/conv"]
+            if base.endswith("/codex"):
+                parent = base[: -len("/codex")] or base
+                return [f"{base}/conv", f"{parent}/codex/conv"]
+            return [f"{base}/codex/conv", f"{base}/codex/conv/"]
         if base.endswith("/codex"):
-            parent = base[: -len("/codex")] or base
-            return [base, f"{base}/", parent]
-        return [f"{base}/codex", f"{base}/codex/", base]
+            return [base, f"{base}/"]
+        return [f"{base}/codex", f"{base}/codex/"]
 
     def _parse_custom_payload(self, payload_text: str) -> str:
         text = payload_text.strip()
@@ -208,7 +197,6 @@ class SimpleTerminalAgent:
         self.workspace = workspace
         self.repo_root = self.workspace.parents[1]
         self.model = model
-        self.provider = os.getenv("SIMVERSE_CLIENT_PROVIDER", "custom").strip().lower()
         self.client = self._build_client()
         self.history: list[dict[str, str]] = []
         self.build_state = BuildState()
@@ -218,18 +206,17 @@ class SimpleTerminalAgent:
         self.system_prompt = self._build_system_prompt()
 
     def _build_client(self) -> PersonalClient | None:
-        provider = self.provider if self.provider in {"openai", "custom"} else "custom"
-        if provider == "openai":
-            if OpenAI is None:
-                return None
-            if not os.getenv("OPENAI_API_KEY"):
-                return None
-        custom_url = os.getenv("SIMVERSE_CUSTOM_API_URL", "http://127.0.0.1:9000/codex")
+        custom_url = os.getenv("SIMVERSE_CUSTOM_API_URL", "http://127.0.0.1:8001/codex")
         timeout_s = int(os.getenv("SIMVERSE_CUSTOM_TIMEOUT_S", "120"))
+        use_conv = os.getenv("SIMVERSE_CUSTOM_USE_CONV", "false").strip().lower() == "true"
+        conv_id = os.getenv("SIMVERSE_CONVERSATION_ID")
+        if use_conv and not conv_id:
+            conv_id = f"simverse-{int(time.time())}"
         return PersonalClient(
-            provider=provider,
             custom_api_url=custom_url,
             custom_timeout_s=timeout_s,
+            use_conversation_endpoint=use_conv,
+            conversation_id=conv_id,
         )
 
     def handle_user_message(self, user_input: str) -> AgentTurn:
@@ -257,10 +244,7 @@ class SimpleTerminalAgent:
             return {
                 "action": "error",
                 "status": "error",
-                "reply": (
-                    "Client unavailable. For OpenAI, install `openai` and set `OPENAI_API_KEY`. "
-                    "For custom, set `SIMVERSE_CLIENT_PROVIDER=custom`."
-                ),
+                "reply": "Custom Codex API client unavailable.",
             }
 
         if lowered == "train":
@@ -282,7 +266,7 @@ class SimpleTerminalAgent:
             + self.history[-20:]
             + [{"role": "user", "content": text}]
         )
-        response = self._create_response(input_payload=messages, max_output_tokens=1400)
+        response = self._create_response(input_payload=messages)
         reply = (getattr(response, "output_text", "") or "").strip()
         if not reply:
             return {
@@ -433,7 +417,6 @@ class SimpleTerminalAgent:
                 },
                 {"role": "user", "content": prompt},
             ],
-            max_output_tokens=3000,
         )
         raw = (getattr(response, "output_text", "") or "").strip()
         call = self._extract_write_file_tool_call(raw=raw, filename=filename)
@@ -454,7 +437,6 @@ class SimpleTerminalAgent:
                 {"role": "user", "content": prompt},
                 {"role": "user", "content": retry_prompt},
             ],
-            max_output_tokens=3000,
         )
         retry_raw = (getattr(retry_response, "output_text", "") or "").strip()
         retry_call = self._extract_write_file_tool_call(raw=retry_raw, filename=filename)
@@ -671,7 +653,6 @@ class SimpleTerminalAgent:
         self,
         *,
         input_payload: list[dict[str, Any]],
-        max_output_tokens: int,
     ) -> Any:
         if self.client is None:
             raise RuntimeError("Personal client unavailable")
@@ -679,9 +660,7 @@ class SimpleTerminalAgent:
         for attempt in range(3):
             try:
                 return self.client.create_response(
-                    model=self.model,
                     input_payload=input_payload,
-                    max_output_tokens=max_output_tokens,
                 )
             except Exception as exc:
                 last_error = exc
