@@ -65,7 +65,7 @@ class PersonalClient:
         self,
         provider: str = "custom",
         *,
-        custom_api_url: str = "http://127.0.0.1:8000/codex",
+        custom_api_url: str = "http://127.0.0.1:9000/codex",
         custom_timeout_s: int = 120,
     ) -> None:
         normalized = provider.strip().lower()
@@ -107,20 +107,36 @@ class PersonalClient:
             "include_events": False,
             "extra_args": ["--skip-git-repo-check"],
         }
-        req = urllib.request.Request(
-            self.custom_api_url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.custom_timeout_s + 5) as resp:
-                payload_text = resp.read().decode("utf-8")
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"Custom API request failed: {exc}") from exc
+        candidate_urls = self._candidate_custom_urls(self.custom_api_url)
+        last_error: Exception | None = None
+        payload_text: str | None = None
+        for url in candidate_urls:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.custom_timeout_s + 5) as resp:
+                    payload_text = resp.read().decode("utf-8")
+                    break
+            except urllib.error.URLError as exc:
+                last_error = exc
+                continue
+        if payload_text is None:
+            raise RuntimeError(f"Custom API request failed: {last_error}")
 
         parsed = self._parse_custom_payload(payload_text)
         return ClientResponse(output_text=parsed)
+
+    def _candidate_custom_urls(self, configured_url: str) -> list[str]:
+        base = configured_url.rstrip("/")
+        if not base:
+            return ["http://127.0.0.1:9000/codex", "http://127.0.0.1:9000"]
+        if base.endswith("/codex"):
+            return [base, base[: -len("/codex")] or base]
+        return [f"{base}/codex", base]
 
     def _parse_custom_payload(self, payload_text: str) -> str:
         text = payload_text.strip()
@@ -181,7 +197,7 @@ class SimpleTerminalAgent:
                 return None
             if not os.getenv("OPENAI_API_KEY"):
                 return None
-        custom_url = os.getenv("SIMVERSE_CUSTOM_API_URL", "http://127.0.0.1:8000/codex")
+        custom_url = os.getenv("SIMVERSE_CUSTOM_API_URL", "http://127.0.0.1:9000/codex")
         timeout_s = int(os.getenv("SIMVERSE_CUSTOM_TIMEOUT_S", "120"))
         return PersonalClient(
             provider=provider,
@@ -665,7 +681,10 @@ class AgenticLoop:
 
     def run_once(self, user_input: str) -> AgentTurn:
         obs = self.agent.observe(user_input)
-        decision = self.agent.decide(obs)
+        try:
+            decision = self.agent.decide(obs)
+        except Exception as exc:
+            return AgentTurn(status="error", reply=f"Request failed: {exc}")
         turn = self.agent.act(decision)
         validated_turn = self.agent.check(turn)
         self.agent.update(user_input, validated_turn)
