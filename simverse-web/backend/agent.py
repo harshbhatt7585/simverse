@@ -105,11 +105,13 @@ class PersonalClient:
             "prompt": prompt,
             "timeout_s": self.custom_timeout_s,
             "include_events": False,
+            "include_raw_output": True,
             "extra_args": ["--skip-git-repo-check"],
         }
         candidate_urls = self._candidate_custom_urls(self.custom_api_url)
         last_error: Exception | None = None
         payload_text: str | None = None
+        attempted: list[str] = []
         for url in candidate_urls:
             req = urllib.request.Request(
                 url,
@@ -121,11 +123,17 @@ class PersonalClient:
                 with urllib.request.urlopen(req, timeout=self.custom_timeout_s + 5) as resp:
                     payload_text = resp.read().decode("utf-8")
                     break
+            except urllib.error.HTTPError as exc:
+                attempted.append(f"{url} -> HTTP {exc.code}")
+                last_error = exc
+                continue
             except urllib.error.URLError as exc:
+                attempted.append(f"{url} -> {exc}")
                 last_error = exc
                 continue
         if payload_text is None:
-            raise RuntimeError(f"Custom API request failed: {last_error}")
+            detail = "; ".join(attempted) if attempted else str(last_error)
+            raise RuntimeError(f"Custom API request failed. Tried: {detail}")
 
         parsed = self._parse_custom_payload(payload_text)
         return ClientResponse(output_text=parsed)
@@ -133,10 +141,15 @@ class PersonalClient:
     def _candidate_custom_urls(self, configured_url: str) -> list[str]:
         base = configured_url.rstrip("/")
         if not base:
-            return ["http://127.0.0.1:9000/codex", "http://127.0.0.1:9000"]
+            return [
+                "http://127.0.0.1:9000/codex",
+                "http://127.0.0.1:9000/codex/",
+                "http://127.0.0.1:9000",
+            ]
         if base.endswith("/codex"):
-            return [base, base[: -len("/codex")] or base]
-        return [f"{base}/codex", base]
+            parent = base[: -len("/codex")] or base
+            return [base, f"{base}/", parent]
+        return [f"{base}/codex", f"{base}/codex/", base]
 
     def _parse_custom_payload(self, payload_text: str) -> str:
         text = payload_text.strip()
@@ -160,9 +173,9 @@ class PersonalClient:
             ):
                 value = data.get(key)
                 if isinstance(value, str):
-                    return value
+                    return self._strip_code_fence(value)
             if isinstance(data.get("output"), str):
-                return data["output"]
+                return self._strip_code_fence(data["output"])
             return json.dumps(data)
         if isinstance(data, list):
             joined: list[str] = []
@@ -171,12 +184,19 @@ class PersonalClient:
                     for key in ("text", "content", "message"):
                         value = item.get(key)
                         if isinstance(value, str):
-                            joined.append(value)
+                            joined.append(self._strip_code_fence(value))
                             break
                 elif isinstance(item, str):
-                    joined.append(item)
+                    joined.append(self._strip_code_fence(item))
             return "\n".join(joined).strip()
         return str(data)
+
+    def _strip_code_fence(self, text: str) -> str:
+        stripped = text.strip()
+        match = re.match(r"^```(?:python|json)?\n(.*)\n```$", stripped, flags=re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return stripped
 
 
 class SimpleTerminalAgent:
