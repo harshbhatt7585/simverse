@@ -142,9 +142,7 @@ class PersonalClient:
         base = configured_url.rstrip("/")
         if not base:
             return [
-                "http://127.0.0.1:9000/codex",
-                "http://127.0.0.1:9000/codex/",
-                "http://127.0.0.1:9000",
+                "http://0.0.0.0:8001/codex",
             ]
         if base.endswith("/codex"):
             parent = base[: -len("/codex")] or base
