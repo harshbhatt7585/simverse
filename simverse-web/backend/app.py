@@ -25,6 +25,16 @@ def run_cli() -> None:
             print("Exiting.")
             break
 
+        lowered = user_input.lower()
+        if lowered == "train":
+            print("Agent: starting training run...")
+        elif (
+            lowered in {"build", "generate", "create env", "create environment"}
+            or ("build" in lowered and "env" in lowered)
+            or ("generate" in lowered and "env" in lowered)
+        ):
+            print("Agent: starting environment creation (files will be generated one-by-one)...")
+
         turn = agent.handle_user_message(user_input)
         print(f"\nAgent ({turn.status}): {turn.reply}\n")
 

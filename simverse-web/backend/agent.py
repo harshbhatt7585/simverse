@@ -39,6 +39,7 @@ class AgentTurn:
 class BuildState:
     env_dir: Path | None = None
     generated_files: dict[str, str] = field(default_factory=dict)
+    awaiting_build_confirmation: bool = False
 
 
 @dataclass
@@ -102,6 +103,9 @@ class SimpleTerminalAgent:
         if lowered == "train":
             return {"action": "run_train", "status": "run_train"}
 
+        if self._is_yes_intent(lowered) and self.build_state.awaiting_build_confirmation:
+            return {"action": "build_files", "status": "build"}
+
         if self._is_build_intent(lowered):
             return {"action": "build_files", "status": "build"}
 
@@ -138,14 +142,17 @@ class SimpleTerminalAgent:
         if action == "run_train":
             return self._run_training()
         if action == "build_files":
+            self.build_state.awaiting_build_confirmation = False
             return self._build_files_one_by_one()
         if action == "finish":
             return AgentTurn(status="done", reply=str(decision.get("reply", "Done.")))
 
-        return AgentTurn(
+        turn = AgentTurn(
             status=str(decision.get("status", "ok")),
             reply=str(decision.get("reply", "OK")),
         )
+        self.build_state.awaiting_build_confirmation = self._asks_user_to_build(turn.reply)
+        return turn
 
     def check(self, turn: AgentTurn) -> AgentTurn:
         if not turn.reply.strip():
@@ -169,16 +176,35 @@ class SimpleTerminalAgent:
         }
 
         generated: dict[str, str] = {}
-        for filename in order:
-            code = self._generate_single_file(
-                filename=filename,
-                instruction=instructions[filename],
-                generated_so_far=generated,
-            )
-            (out_dir / filename).write_text(code.rstrip() + "\n", encoding="utf-8")
-            generated[filename] = code
-
         self.build_state.env_dir = out_dir
+        self.build_state.generated_files = {}
+        for filename in order:
+            print(f"Agent: generating {filename}...")
+            try:
+                code = self._generate_single_file(
+                    filename=filename,
+                    instruction=instructions[filename],
+                    generated_so_far=generated,
+                )
+                file_path = out_dir / filename
+                file_path.write_text(code.rstrip() + "\n", encoding="utf-8")
+                self._format_generated_file(file_path)
+                generated[filename] = code
+                self.build_state.generated_files[filename] = code
+                print(f"Agent: saved {file_path}")
+            except Exception as exc:
+                partial = ", ".join(generated.keys()) if generated else "(none)"
+                return AgentTurn(
+                    status="error",
+                    reply=(
+                        "Build failed while generating files.\n"
+                        f"Failed file: {filename}\n"
+                        f"Saved so far: {partial}\n"
+                        f"Output folder: {out_dir}\n"
+                        f"Error: {exc}"
+                    ),
+                )
+
         self.build_state.generated_files = generated
         files_written = "\n".join(f"- {out_dir / name}" for name in order)
         reply = (
@@ -204,6 +230,14 @@ class SimpleTerminalAgent:
             "No markdown, no explanation.\n\n"
             f"Target file: {filename}\n"
             f"Task: {instruction}\n\n"
+            "Formatting and quality requirements:\n"
+            "- Output valid Python 3.10+ syntax.\n"
+            "- Keep lines <= 100 chars.\n"
+            "- Use clear type hints on public functions.\n"
+            "- Use clean imports (no unused imports).\n"
+            "- Keep names consistent and descriptive.\n"
+            "- No TODO placeholders or pseudo code.\n"
+            "- Ensure file is immediately runnable/importable.\n\n"
             "Required framework constraints:\n"
             "- Use SimVerse abstractions correctly.\n"
             "- Use `simverse.abstractor.*` and `simverse.envs.<new_env>.*` import patterns.\n"
@@ -232,7 +266,7 @@ class SimpleTerminalAgent:
             max_output_tokens=5000,
         )
         raw = (getattr(response, "output_text", "") or "").strip()
-        code = self._extract_code(raw)
+        code = self._extract_code(raw, filename=filename)
         if len(code) >= 120:
             return code
 
@@ -254,7 +288,7 @@ class SimpleTerminalAgent:
             max_output_tokens=5000,
         )
         retry_raw = (getattr(retry_response, "output_text", "") or "").strip()
-        return self._extract_code(retry_raw)
+        return self._extract_code(retry_raw, filename=filename)
 
     def _build_abstract_context(self) -> dict[str, str]:
         base = self.repo_root / "src" / "simverse"
@@ -387,6 +421,19 @@ class SimpleTerminalAgent:
         has_target_word = re.search(r"\b(env|environment|files|code|rl)\b", lowered_text)
         return bool(has_build_word and has_target_word)
 
+    def _is_yes_intent(self, lowered_text: str) -> bool:
+        cleaned = lowered_text.strip()
+        return cleaned in {"yes", "y", "ok", "okay", "sure", "yep", "do it", "go ahead"}
+
+    def _asks_user_to_build(self, reply: str) -> bool:
+        lowered = reply.lower()
+        return (
+            "type `build`" in lowered
+            or "type build" in lowered
+            or "say build" in lowered
+            or "run build" in lowered
+        )
+
     def _history_text(self) -> str:
         lines: list[str] = []
         for msg in self.history[-30:]:
@@ -410,12 +457,23 @@ class SimpleTerminalAgent:
             return "Keep render simple and terminal-friendly."
         return ""
 
-    def _extract_code(self, raw: str) -> str:
-        if raw.startswith("```"):
-            matches = re.findall(r"```(?:python)?\n(.*?)```", raw, flags=re.DOTALL)
-            if matches:
-                return matches[0].strip()
-        return raw.strip()
+    def _extract_code(self, raw: str, *, filename: str) -> str:
+        matches = re.findall(r"```(?:python)?\n(.*?)```", raw, flags=re.DOTALL)
+        if matches:
+            # Prefer the longest code block; models sometimes prepend short snippets.
+            return max(matches, key=len).strip()
+
+        # Fallback: strip common prose prefixes if no code fence exists.
+        candidate = raw.strip()
+        candidate = re.sub(
+            r"^.*?(from __future__ import annotations)",
+            r"\1",
+            candidate,
+            flags=re.DOTALL,
+        )
+        if len(candidate) < 40:
+            raise ValueError(f"Model returned insufficient code for {filename}")
+        return candidate
 
     def _clip(self, text: str, *, max_chars: int) -> str:
         if len(text) <= max_chars:
@@ -427,6 +485,17 @@ class SimpleTerminalAgent:
         if not path.exists():
             return f"(missing: {path})"
         return path.read_text(encoding="utf-8")
+
+    def _format_generated_file(self, path: Path) -> None:
+        proc: CompletedProcess[str] = run(
+            ["ruff", "format", str(path)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"ruff format failed for {path.name}: {proc.stderr.strip() or proc.stdout.strip()}"
+            )
 
 
 class AgenticLoop:
@@ -459,6 +528,16 @@ def run_cli() -> None:
         if user_input.lower() in {"exit", "quit"}:
             print("Exiting.")
             break
+
+        lowered = user_input.lower()
+        if lowered == "train":
+            print("Agent: starting training run...")
+        elif (
+            lowered in {"build", "generate", "create env", "create environment"}
+            or ("build" in lowered and "env" in lowered)
+            or ("generate" in lowered and "env" in lowered)
+        ):
+            print("Agent: starting environment creation (files will be generated one-by-one)...")
 
         turn = agent.handle_user_message(user_input)
         print(f"Agent ({turn.status}): {turn.reply}\n")
