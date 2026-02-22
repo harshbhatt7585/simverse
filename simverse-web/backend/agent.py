@@ -148,7 +148,16 @@ class PersonalClient:
             return text
 
         if isinstance(data, dict):
-            for key in ("output_text", "text", "response", "result", "content"):
+            for key in (
+                "final_text",
+                "output_text",
+                "text",
+                "response",
+                "result",
+                "content",
+                "stdout_text",
+                "stderr_text",
+            ):
                 value = data.get(key)
                 if isinstance(value, str):
                     return value
