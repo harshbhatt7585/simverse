@@ -301,17 +301,20 @@ class SimpleTerminalAgent:
         base = self.repo_root / "src" / "simverse"
         return {
             "simenv": self._clip(
-                self._read_text(base / "abstractor" / "simenv.py"), max_chars=6000
+                self._read_text(base / "abstractor" / "simenv.py"),
+                max_chars=6000,
             ),
             "simagent": self._clip(
-                self._read_text(base / "abstractor" / "agent.py"), max_chars=3500
+                self._read_text(base / "abstractor" / "agent.py"),
+                max_chars=3500,
             ),
             "train_utils": self._clip(
                 self._read_text(base / "abstractor" / "train_utils.py"),
                 max_chars=7000,
             ),
             "snake_env": self._clip(
-                self._read_text(base / "envs" / "snake" / "env.py"), max_chars=5000
+                self._read_text(base / "envs" / "snake" / "env.py"),
+                max_chars=5000,
             ),
             "snake_agent": self._clip(
                 self._read_text(base / "envs" / "snake" / "agent.py"),
