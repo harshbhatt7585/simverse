@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover
+    OpenAI = None  # type: ignore[assignment]
 
 
 def _load_env_from_file(path: Path) -> None:
@@ -48,6 +55,105 @@ class LoopState:
     max_steps: int = 100
 
 
+@dataclass
+class ClientResponse:
+    output_text: str
+
+
+class PersonalClient:
+    def __init__(
+        self,
+        provider: str = "custom",
+        *,
+        custom_api_url: str = "http://127.0.0.1:8000/codex",
+        custom_timeout_s: int = 120,
+    ) -> None:
+        normalized = provider.strip().lower()
+        self.provider = normalized if normalized in {"openai", "custom"} else "custom"
+        self.custom_api_url = custom_api_url
+        self.custom_timeout_s = int(custom_timeout_s)
+        self.openai_client = OpenAI() if self.provider == "openai" else None
+
+    def create_response(
+        self,
+        *,
+        model: str,
+        input_payload: list[dict[str, Any]],
+        max_output_tokens: int,
+    ) -> ClientResponse:
+        if self.provider == "openai":
+            if self.openai_client is None:
+                raise RuntimeError("OpenAI provider selected but openai client is unavailable")
+            response = self.openai_client.responses.create(
+                model=model,
+                input=input_payload,
+                reasoning={"effort": "minimal"},
+                max_output_tokens=max_output_tokens,
+            )
+            return ClientResponse(output_text=(getattr(response, "output_text", "") or ""))
+        return self._create_custom_response(input_payload=input_payload)
+
+    def _create_custom_response(self, *, input_payload: list[dict[str, Any]]) -> ClientResponse:
+        prompt_parts: list[str] = []
+        for message in input_payload:
+            role = str(message.get("role", "user"))
+            content = str(message.get("content", ""))
+            prompt_parts.append(f"[{role}]\\n{content}")
+        prompt = "\n\n".join(prompt_parts)
+
+        body = {
+            "prompt": prompt,
+            "timeout_s": self.custom_timeout_s,
+            "include_events": False,
+            "extra_args": ["--skip-git-repo-check"],
+        }
+        req = urllib.request.Request(
+            self.custom_api_url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.custom_timeout_s + 5) as resp:
+                payload_text = resp.read().decode("utf-8")
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Custom API request failed: {exc}") from exc
+
+        parsed = self._parse_custom_payload(payload_text)
+        return ClientResponse(output_text=parsed)
+
+    def _parse_custom_payload(self, payload_text: str) -> str:
+        text = payload_text.strip()
+        if not text:
+            return ""
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+
+        if isinstance(data, dict):
+            for key in ("output_text", "text", "response", "result", "content"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    return value
+            if isinstance(data.get("output"), str):
+                return data["output"]
+            return json.dumps(data)
+        if isinstance(data, list):
+            joined: list[str] = []
+            for item in data:
+                if isinstance(item, dict):
+                    for key in ("text", "content", "message"):
+                        value = item.get(key)
+                        if isinstance(value, str):
+                            joined.append(value)
+                            break
+                elif isinstance(item, str):
+                    joined.append(item)
+            return "\n".join(joined).strip()
+        return str(data)
+
+
 class SimpleTerminalAgent:
     def __init__(
         self,
@@ -59,6 +165,7 @@ class SimpleTerminalAgent:
         self.workspace = workspace
         self.repo_root = self.workspace.parents[1]
         self.model = model
+        self.provider = os.getenv("SIMVERSE_CLIENT_PROVIDER", "custom").strip().lower()
         self.client = self._build_client()
         self.history: list[dict[str, str]] = []
         self.build_state = BuildState()
@@ -67,10 +174,20 @@ class SimpleTerminalAgent:
         self.farmtila_examples = self._build_farmtila_examples()
         self.system_prompt = self._build_system_prompt()
 
-    def _build_client(self) -> OpenAI | None:
-        if not os.getenv("OPENAI_API_KEY"):
-            return None
-        return OpenAI()
+    def _build_client(self) -> PersonalClient | None:
+        provider = self.provider if self.provider in {"openai", "custom"} else "custom"
+        if provider == "openai":
+            if OpenAI is None:
+                return None
+            if not os.getenv("OPENAI_API_KEY"):
+                return None
+        custom_url = os.getenv("SIMVERSE_CUSTOM_API_URL", "http://127.0.0.1:8000/codex")
+        timeout_s = int(os.getenv("SIMVERSE_CUSTOM_TIMEOUT_S", "120"))
+        return PersonalClient(
+            provider=provider,
+            custom_api_url=custom_url,
+            custom_timeout_s=timeout_s,
+        )
 
     def handle_user_message(self, user_input: str) -> AgentTurn:
         loop = AgenticLoop(self)
@@ -97,7 +214,10 @@ class SimpleTerminalAgent:
             return {
                 "action": "error",
                 "status": "error",
-                "reply": "OpenAI client unavailable. Install `openai` and set `OPENAI_API_KEY`.",
+                "reply": (
+                    "Client unavailable. For OpenAI, install `openai` and set `OPENAI_API_KEY`. "
+                    "For custom, set `SIMVERSE_CLIENT_PROVIDER=custom`."
+                ),
             }
 
         if lowered == "train":
@@ -119,12 +239,7 @@ class SimpleTerminalAgent:
             + self.history[-20:]
             + [{"role": "user", "content": text}]
         )
-        response = self.client.responses.create(
-            model=self.model,
-            input=messages,
-            reasoning={"effort": "minimal"},
-            max_output_tokens=1400,
-        )
+        response = self._create_response(input_payload=messages, max_output_tokens=1400)
         reply = (getattr(response, "output_text", "") or "").strip()
         if not reply:
             return {
@@ -226,8 +341,22 @@ class SimpleTerminalAgent:
         example_context = self._example_for_file(filename)
 
         prompt = (
-            "Return ONLY raw Python code for the requested file. "
-            "No markdown, no explanation.\n\n"
+            "You must return ONLY JSON with tool calls. No markdown, no prose.\n\n"
+            "Tool schema:\n"
+            "{\n"
+            '  "tool_calls": [\n'
+            "    {\n"
+            '      "tool": "write_file",\n'
+            '      "path": "target filename",\n'
+            '      "content": "full python file content"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- Return exactly one tool call.\n"
+            f"- `path` MUST be exactly `{filename}`.\n"
+            "- `content` must be complete file code.\n"
+            "- No extra keys outside schema.\n\n"
             f"Target file: {filename}\n"
             f"Task: {instruction}\n\n"
             "Formatting and quality requirements:\n"
@@ -253,30 +382,28 @@ class SimpleTerminalAgent:
             f"{example_context}\n"
         )
 
-        response = self.client.responses.create(
-            model=self.model,
-            input=[
+        response = self._create_response(
+            input_payload=[
                 {
                     "role": "system",
                     "content": self.system_prompt,
                 },
                 {"role": "user", "content": prompt},
             ],
-            reasoning={"effort": "minimal"},
-            max_output_tokens=5000,
+            max_output_tokens=3000,
         )
         raw = (getattr(response, "output_text", "") or "").strip()
-        code = self._extract_code(raw, filename=filename)
+        call = self._extract_write_file_tool_call(raw=raw, filename=filename)
+        code = str(call["content"]).strip()
         if len(code) >= 120:
             return code
 
         retry_prompt = (
             f"Regenerate `{filename}` with full implementation. "
-            "Return only code and ensure imports/classes/functions are complete."
+            "Remember: return JSON tool_calls only, exactly one write_file call."
         )
-        retry_response = self.client.responses.create(
-            model=self.model,
-            input=[
+        retry_response = self._create_response(
+            input_payload=[
                 {
                     "role": "system",
                     "content": self.system_prompt,
@@ -284,11 +411,11 @@ class SimpleTerminalAgent:
                 {"role": "user", "content": prompt},
                 {"role": "user", "content": retry_prompt},
             ],
-            reasoning={"effort": "minimal"},
-            max_output_tokens=5000,
+            max_output_tokens=3000,
         )
         retry_raw = (getattr(retry_response, "output_text", "") or "").strip()
-        return self._extract_code(retry_raw, filename=filename)
+        retry_call = self._extract_write_file_tool_call(raw=retry_raw, filename=filename)
+        return str(retry_call["content"]).strip()
 
     def _build_abstract_context(self) -> dict[str, str]:
         base = self.repo_root / "src" / "simverse"
@@ -337,23 +464,9 @@ class SimpleTerminalAgent:
             f"You are {self.name}. You are an expert SimVerse RL environment builder.\n"
             "Ask concise follow-up questions when details are missing.\n"
             "When user asks to build, generate complete and consistent files.\n"
-            "Follow SimVerse abstractions exactly.\n\n"
-            "SimVerse abstraction contracts (must follow):\n\n"
-            "### simverse/abstractor/simenv.py\n"
-            f"{self.abstract_context['simenv']}\n\n"
-            "### simverse/abstractor/agent.py\n"
-            f"{self.abstract_context['simagent']}\n\n"
-            "### simverse/abstractor/train_utils.py\n"
-            f"{self.abstract_context['train_utils']}\n\n"
-            "Farmtila reference code (use as implementation pattern):\n\n"
-            "### farmtila/config.py\n"
-            f"{self.farmtila_examples['config.py']}\n\n"
-            "### farmtila/agent.py\n"
-            f"{self.farmtila_examples['agent.py']}\n\n"
-            "### farmtila/env.py\n"
-            f"{self.farmtila_examples['env.py']}\n\n"
-            "### farmtila/train.py\n"
-            f"{self.farmtila_examples['train.py']}\n"
+            "Follow SimVerse abstractions exactly.\n"
+            "When generating files, obey the tool-call JSON schema exactly.\n"
+            "Never return prose when tool calls are requested.\n"
         )
 
     def _context_for_file(self, filename: str) -> str:
@@ -457,23 +570,48 @@ class SimpleTerminalAgent:
             return "Keep render simple and terminal-friendly."
         return ""
 
-    def _extract_code(self, raw: str, *, filename: str) -> str:
-        matches = re.findall(r"```(?:python)?\n(.*?)```", raw, flags=re.DOTALL)
-        if matches:
-            # Prefer the longest code block; models sometimes prepend short snippets.
-            return max(matches, key=len).strip()
+    def _extract_write_file_tool_call(self, *, raw: str, filename: str) -> dict[str, str]:
+        payload = self._parse_json_object(raw)
+        tool_calls = payload.get("tool_calls")
+        if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+            raise ValueError(f"Expected exactly one tool call for {filename}")
 
-        # Fallback: strip common prose prefixes if no code fence exists.
-        candidate = raw.strip()
-        candidate = re.sub(
-            r"^.*?(from __future__ import annotations)",
-            r"\1",
-            candidate,
-            flags=re.DOTALL,
-        )
-        if len(candidate) < 40:
-            raise ValueError(f"Model returned insufficient code for {filename}")
-        return candidate
+        call = tool_calls[0]
+        if not isinstance(call, dict):
+            raise ValueError(f"Invalid tool call object for {filename}")
+        if call.get("tool") != "write_file":
+            raise ValueError(f"Unsupported tool `{call.get('tool')}` for {filename}")
+        if call.get("path") != filename:
+            raise ValueError(f"Tool call path must be exactly `{filename}`")
+
+        content = call.get("content")
+        if not isinstance(content, str) or len(content.strip()) < 40:
+            raise ValueError(f"Tool call content is too short for {filename}")
+        return {"tool": "write_file", "path": filename, "content": content}
+
+    def _parse_json_object(self, raw: str) -> dict[str, Any]:
+        text = raw.strip()
+        if text.startswith("```"):
+            fenced = re.findall(r"```(?:json)?\n(.*?)```", text, flags=re.DOTALL)
+            if fenced:
+                text = fenced[0].strip()
+
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("Model did not return JSON object")
+        candidate = text[start : end + 1]
+        payload = json.loads(candidate)
+        if not isinstance(payload, dict):
+            raise ValueError("Model JSON payload is not an object")
+        return payload
 
     def _clip(self, text: str, *, max_chars: int) -> str:
         if len(text) <= max_chars:
@@ -485,6 +623,29 @@ class SimpleTerminalAgent:
         if not path.exists():
             return f"(missing: {path})"
         return path.read_text(encoding="utf-8")
+
+    def _create_response(
+        self,
+        *,
+        input_payload: list[dict[str, Any]],
+        max_output_tokens: int,
+    ) -> Any:
+        if self.client is None:
+            raise RuntimeError("Personal client unavailable")
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self.client.create_response(
+                    model=self.model,
+                    input_payload=input_payload,
+                    max_output_tokens=max_output_tokens,
+                )
+            except Exception as exc:
+                last_error = exc
+                if attempt == 2:
+                    break
+                time.sleep(1.0 * (attempt + 1))
+        raise RuntimeError(f"Model request failed after retries: {last_error}")
 
     def _format_generated_file(self, path: Path) -> None:
         proc: CompletedProcess[str] = run(
