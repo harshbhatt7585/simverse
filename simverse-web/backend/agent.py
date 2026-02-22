@@ -47,38 +47,6 @@ class LoopState:
     max_steps: int = 100
 
 
-EXAMPLE_ENV_CODE = """
-from simverse.abstractor.simenv import SimEnv
-
-class ExampleEnv(SimEnv):
-    pass
-""".strip()
-
-EXAMPLE_AGENT_CODE = """
-from simverse.abstractor.agent import SimAgent
-
-class ExampleAgent(SimAgent):
-    pass
-""".strip()
-
-EXAMPLE_CONFIG_CODE = """
-from dataclasses import dataclass
-
-@dataclass
-class ExampleConfig:
-    width: int = 20
-    height: int = 20
-""".strip()
-
-EXAMPLE_TRAIN_CODE = """
-def train() -> None:
-    print("training")
-
-if __name__ == "__main__":
-    train()
-""".strip()
-
-
 class SimpleTerminalAgent:
     def __init__(
         self,
@@ -95,6 +63,8 @@ class SimpleTerminalAgent:
         self.build_state = BuildState()
         self.loop_state = LoopState()
         self.abstract_context = self._build_abstract_context()
+        self.farmtila_examples = self._build_farmtila_examples()
+        self.system_prompt = self._build_system_prompt()
 
     def _build_client(self) -> OpenAI | None:
         if not os.getenv("OPENAI_API_KEY"):
@@ -139,12 +109,7 @@ class SimpleTerminalAgent:
             [
                 {
                     "role": "system",
-                    "content": (
-                        f"You are {self.name}. Be practical and specific. "
-                        "Ask for missing RL environment details. "
-                        "Provide enough detail to be useful. "
-                        "When ready, ask user to type `build`."
-                    ),
+                    "content": self.system_prompt,
                 }
             ]
             + self.history[-20:]
@@ -259,10 +224,7 @@ class SimpleTerminalAgent:
             input=[
                 {
                     "role": "system",
-                    "content": (
-                        f"You are {self.name}. "
-                        "Generate production-quality Python files for SimVerse."
-                    ),
+                    "content": self.system_prompt,
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -283,10 +245,7 @@ class SimpleTerminalAgent:
             input=[
                 {
                     "role": "system",
-                    "content": (
-                        f"You are {self.name}. "
-                        "Generate production-quality Python files for SimVerse."
-                    ),
+                    "content": self.system_prompt,
                 },
                 {"role": "user", "content": prompt},
                 {"role": "user", "content": retry_prompt},
@@ -312,23 +271,49 @@ class SimpleTerminalAgent:
                 self._read_text(base / "abstractor" / "train_utils.py"),
                 max_chars=7000,
             ),
-            "snake_env": self._clip(
-                self._read_text(base / "envs" / "snake" / "env.py"),
+            "farmtila_env": self._clip(
+                self._read_text(base / "envs" / "farmtila" / "env.py"),
                 max_chars=5000,
             ),
-            "snake_agent": self._clip(
-                self._read_text(base / "envs" / "snake" / "agent.py"),
+            "farmtila_agent": self._clip(
+                self._read_text(base / "envs" / "farmtila" / "agent.py"),
                 max_chars=3500,
             ),
-            "snake_config": self._clip(
-                self._read_text(base / "envs" / "snake" / "config.py"),
+            "farmtila_config": self._clip(
+                self._read_text(base / "envs" / "farmtila" / "config.py"),
                 max_chars=2500,
             ),
-            "snake_train": self._clip(
-                self._read_text(base / "envs" / "snake" / "train.py"),
+            "farmtila_train": self._clip(
+                self._read_text(base / "envs" / "farmtila" / "train.py"),
                 max_chars=5000,
             ),
         }
+
+    def _build_farmtila_examples(self) -> dict[str, str]:
+        base = self.repo_root / "src" / "simverse" / "envs" / "farmtila"
+        return {
+            "env.py": self._read_text(base / "env.py"),
+            "config.py": self._read_text(base / "config.py"),
+            "agent.py": self._read_text(base / "agent.py"),
+            "train.py": self._read_text(base / "train.py"),
+        }
+
+    def _build_system_prompt(self) -> str:
+        return (
+            f"You are {self.name}. You are an expert SimVerse RL environment builder.\n"
+            "Ask concise follow-up questions when details are missing.\n"
+            "When user asks to build, generate complete and consistent files.\n"
+            "Follow SimVerse abstractions exactly.\n\n"
+            "Farmtila reference code (use as implementation pattern):\n\n"
+            "### farmtila/config.py\n"
+            f"{self.farmtila_examples['config.py']}\n\n"
+            "### farmtila/agent.py\n"
+            f"{self.farmtila_examples['agent.py']}\n\n"
+            "### farmtila/env.py\n"
+            f"{self.farmtila_examples['env.py']}\n\n"
+            "### farmtila/train.py\n"
+            f"{self.farmtila_examples['train.py']}\n"
+        )
 
     def _context_for_file(self, filename: str) -> str:
         if filename == "env.py":
@@ -336,23 +321,23 @@ class SimpleTerminalAgent:
                 "SimEnv interface:\n"
                 f"{self.abstract_context['simenv']}\n\n"
                 "Reference env pattern:\n"
-                f"{self.abstract_context['snake_env']}"
+                f"{self.abstract_context['farmtila_env']}"
             )
         if filename == "agent.py":
             return (
                 "SimAgent interface:\n"
                 f"{self.abstract_context['simagent']}\n\n"
                 "Reference agent pattern:\n"
-                f"{self.abstract_context['snake_agent']}"
+                f"{self.abstract_context['farmtila_agent']}"
             )
         if filename == "config.py":
-            return "Reference config pattern:\n" f"{self.abstract_context['snake_config']}"
+            return "Reference config pattern:\n" f"{self.abstract_context['farmtila_config']}"
         if filename == "train.py":
             return (
                 "run_ppo_training usage and helpers:\n"
                 f"{self.abstract_context['train_utils']}\n\n"
                 "Reference train pattern:\n"
-                f"{self.abstract_context['snake_train']}"
+                f"{self.abstract_context['farmtila_train']}"
             )
         return (
             "Env rendering should work with generated env state and use simple terminal output.\n"
@@ -412,14 +397,8 @@ class SimpleTerminalAgent:
         return "\n\n".join(blocks)
 
     def _example_for_file(self, filename: str) -> str:
-        if filename == "env.py":
-            return self._clip(EXAMPLE_ENV_CODE, max_chars=5000)
-        if filename == "agent.py":
-            return self._clip(EXAMPLE_AGENT_CODE, max_chars=3000)
-        if filename == "config.py":
-            return self._clip(EXAMPLE_CONFIG_CODE, max_chars=3000)
-        if filename == "train.py":
-            return self._clip(EXAMPLE_TRAIN_CODE, max_chars=3000)
+        if filename in {"env.py", "config.py", "agent.py", "train.py"}:
+            return self.farmtila_examples.get(filename, "")
         if filename == "render.py":
             return "Keep render simple and terminal-friendly."
         return ""
