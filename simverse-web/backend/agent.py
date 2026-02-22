@@ -72,10 +72,16 @@ class PersonalClient:
         self,
         *,
         input_payload: list[dict[str, Any]],
+        timeout_s: int | None = None,
     ) -> ClientResponse:
-        return self._create_custom_response(input_payload=input_payload)
+        return self._create_custom_response(input_payload=input_payload, timeout_s=timeout_s)
 
-    def _create_custom_response(self, *, input_payload: list[dict[str, Any]]) -> ClientResponse:
+    def _create_custom_response(
+        self,
+        *,
+        input_payload: list[dict[str, Any]],
+        timeout_s: int | None = None,
+    ) -> ClientResponse:
         prompt_parts: list[str] = []
         for message in input_payload:
             content = str(message.get("content", ""))
@@ -83,9 +89,10 @@ class PersonalClient:
                 prompt_parts.append(content)
         prompt = "\n\n".join(prompt_parts)
 
+        effective_timeout = int(timeout_s) if timeout_s is not None else self.custom_timeout_s
         body = {
             "prompt": prompt,
-            "timeout_s": self.custom_timeout_s,
+            "timeout_s": effective_timeout,
             "include_events": False,
         }
         if self.use_conversation_endpoint and self.conversation_id:
@@ -102,7 +109,7 @@ class PersonalClient:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(req, timeout=self.custom_timeout_s + 5) as resp:
+                with urllib.request.urlopen(req, timeout=effective_timeout + 5) as resp:
                     payload_text = resp.read().decode("utf-8")
                     break
             except urllib.error.HTTPError as exc:
@@ -417,6 +424,7 @@ class SimpleTerminalAgent:
                 },
                 {"role": "user", "content": prompt},
             ],
+            timeout_s=self._file_timeout_seconds(filename),
         )
         raw = (getattr(response, "output_text", "") or "").strip()
         call = self._extract_write_file_tool_call(raw=raw, filename=filename)
@@ -437,6 +445,7 @@ class SimpleTerminalAgent:
                 {"role": "user", "content": prompt},
                 {"role": "user", "content": retry_prompt},
             ],
+            timeout_s=self._file_timeout_seconds(filename),
         )
         retry_raw = (getattr(retry_response, "output_text", "") or "").strip()
         retry_call = self._extract_write_file_tool_call(raw=retry_raw, filename=filename)
@@ -595,6 +604,14 @@ class SimpleTerminalAgent:
             return "Keep render simple and terminal-friendly."
         return ""
 
+    def _file_timeout_seconds(self, filename: str) -> int:
+        default_timeout = int(os.getenv("SIMVERSE_CUSTOM_TIMEOUT_S", "600"))
+        if filename == "env.py":
+            return max(default_timeout, 1200)
+        if filename == "train.py":
+            return max(default_timeout, 900)
+        return default_timeout
+
     def _extract_write_file_tool_call(self, *, raw: str, filename: str) -> dict[str, str]:
         payload = self._parse_json_object(raw)
         tool_calls = payload.get("tool_calls")
@@ -653,6 +670,7 @@ class SimpleTerminalAgent:
         self,
         *,
         input_payload: list[dict[str, Any]],
+        timeout_s: int | None = None,
     ) -> Any:
         if self.client is None:
             raise RuntimeError("Personal client unavailable")
@@ -661,6 +679,7 @@ class SimpleTerminalAgent:
             try:
                 return self.client.create_response(
                     input_payload=input_payload,
+                    timeout_s=timeout_s,
                 )
             except Exception as exc:
                 last_error = exc
