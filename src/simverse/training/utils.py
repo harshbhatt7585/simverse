@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 
@@ -124,7 +124,6 @@ def run_ppo_training(
     use_compile: bool = False,
     project_name: str = DEFAULT_WANDB_PROJECT,
     policy_name_prefix: str = "agent",
-    frame_sink: Callable[[Dict[str, Any]], None] | None = None,
 ) -> list[torch.nn.Module]:
     num_agents = int(training_config["num_agents"])
     device = str(training_config["device"])
@@ -161,7 +160,6 @@ def run_ppo_training(
         project_name=project_name,
         run_name=run_name,
         episode_save_dir=episode_save_dir,
-        frame_sink=frame_sink,
         device=device,
         batch_size=int(training_config["batch_size"]),
         buffer_size=int(training_config["buffer_size"]),

@@ -7,9 +7,7 @@ import torch
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
 from simverse.envs.snake.env import SnakeEnv, create_env
-from simverse.logging_config import training_logger
 from simverse.policies.simple import SimplePolicy
-from simverse.render.live_server import LiveRenderServer
 from simverse.training.utils import (
     build_ppo_training_config,
     configure_torch_backend,
@@ -47,10 +45,6 @@ def train(
     seed: int | None = None,
     use_wandb: bool = False,
     use_compile: bool = True,
-    render_server: bool = True,
-    render_host: str = "127.0.0.1",
-    render_port: int = 8770,
-    render_stride: int = 1,
 ) -> None:
     if seed is not None:
         np.random.seed(int(seed))
@@ -97,50 +91,21 @@ def train(
     )
 
     run_name = f"snake-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    live_server = None
-    frame_sink = None
-    if render_server:
-        live_server = LiveRenderServer(
-            output_path="recordings/snake/live.jsonl",
-            game="snake",
-            host=render_host,
-            port=render_port,
-            title="Snake Live",
-            frame_stride=render_stride,
-        )
-        live_server.start()
-        live_server.push_meta(
-            {
-                "title": "Snake Live",
-                "env": "snake",
-                "width": config.width,
-                "height": config.height,
-                "channels": int(env.obs_channels),
-            }
-        )
-        training_logger.info(f"Live render server running at {live_server.url()}")
-        frame_sink = live_server.push_frame
-
-    try:
-        run_ppo_training(
-            env=env,
-            training_config=training_config,
-            agent_factory=agent_factory,
-            policy_factory=lambda _obs_space, action_space: SimplePolicy(
-                obs_space=env.observation_space["obs"],
-                action_space=action_space,
-            ),
-            title="Snake Training",
-            run_name=run_name,
-            episode_save_dir="recordings/snake",
-            use_wandb=use_wandb,
-            use_compile=use_compile,
-            policy_name_prefix="snake_agent",
-            frame_sink=frame_sink,
-        )
-    finally:
-        if live_server is not None:
-            live_server.stop()
+    run_ppo_training(
+        env=env,
+        training_config=training_config,
+        agent_factory=agent_factory,
+        policy_factory=lambda _obs_space, action_space: SimplePolicy(
+            obs_space=env.observation_space["obs"],
+            action_space=action_space,
+        ),
+        title="Snake Training",
+        run_name=run_name,
+        episode_save_dir="recordings/snake",
+        use_wandb=use_wandb,
+        use_compile=use_compile,
+        policy_name_prefix="snake_agent",
+    )
 
 
 if __name__ == "__main__":

@@ -12,8 +12,8 @@ Simverse is a torch-native RL playground with built-in environments, policies, a
 ## Package Layout
 - `simverse.core` holds the runtime abstractions and simulator orchestration.
 - `simverse.training` holds PPO, checkpointing, stats, and training helpers.
-- `simverse.render` holds render-facing helpers used by envs and the shared renderer stack.
 - `simverse.envs` holds the built-in environments and their training entrypoints.
+- `renderer/` holds the browser replay UI and replay-serving backend.
 
 ## Quickstart
 Use the lightweight rollout helper against any Gymnasium discrete-action environment:

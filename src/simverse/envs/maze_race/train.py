@@ -5,9 +5,7 @@ import torch
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
 from simverse.envs.maze_race.env import MazeRaceEnv, create_env
-from simverse.logging_config import training_logger
 from simverse.policies.simple import SimplePolicy
-from simverse.render.live_server import LiveRenderServer
 from simverse.training.utils import (
     build_ppo_training_config,
     configure_torch_backend,
@@ -32,10 +30,6 @@ def train(
     episodes: int = 150,
     use_wandb: bool = False,
     use_compile: bool = True,
-    render_server: bool = True,
-    render_host: str = "127.0.0.1",
-    render_port: int = 8770,
-    render_stride: int = 1,
 ) -> None:
     device = resolve_torch_device(prefer_mps=True)
     dtype = resolve_rollout_dtype(device, cpu_dtype=torch.bfloat16)
@@ -67,50 +61,21 @@ def train(
         dtype=dtype,
     )
 
-    live_server = None
-    frame_sink = None
-    if render_server:
-        live_server = LiveRenderServer(
-            output_path="recordings/maze_race/live.jsonl",
-            game="maze",
-            host=render_host,
-            port=render_port,
-            title="Maze Race Live",
-            frame_stride=render_stride,
-        )
-        live_server.start()
-        live_server.push_meta(
-            {
-                "title": "Maze Race Live",
-                "env": "maze_race",
-                "width": config.width,
-                "height": config.height,
-                "channels": 5,
-            }
-        )
-        training_logger.info(f"Live render server running at {live_server.url()}")
-        frame_sink = live_server.push_frame
-
-    try:
-        run_ppo_training(
-            env=env,
-            training_config=training_config,
-            agent_factory=agent_factory,
-            policy_factory=lambda obs_space, action_space: SimplePolicy(
-                obs_space=obs_space,
-                action_space=action_space,
-            ),
-            title="Maze Race Training",
-            run_name="ppo-maze-race",
-            episode_save_dir="recordings/maze_race",
-            use_wandb=use_wandb,
-            use_compile=use_compile,
-            policy_name_prefix="maze_race_agent",
-            frame_sink=frame_sink,
-        )
-    finally:
-        if live_server is not None:
-            live_server.stop()
+    run_ppo_training(
+        env=env,
+        training_config=training_config,
+        agent_factory=agent_factory,
+        policy_factory=lambda obs_space, action_space: SimplePolicy(
+            obs_space=obs_space,
+            action_space=action_space,
+        ),
+        title="Maze Race Training",
+        run_name="ppo-maze-race",
+        episode_save_dir="recordings/maze_race",
+        use_wandb=use_wandb,
+        use_compile=use_compile,
+        policy_name_prefix="maze_race_agent",
+    )
 
 
 if __name__ == "__main__":

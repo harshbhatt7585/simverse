@@ -5,9 +5,8 @@ An environment package is considered complete when it includes:
 - `env.py`
 - `train.py`
 
-`render.py` is optional. Use it only for environments that still need a local renderer, such as
-`farmtila`. For live/replay visualization, prefer publishing frames into the shared `renderer/`
-stack instead.
+Visualization should happen through the shared browser-based `renderer/` app. Environment packages
+should not include local Python render entrypoints.
 
 ## Recommended Pattern
 
@@ -22,7 +21,7 @@ stack instead.
    - `compile_policy_models`
    - `build_adam_optimizers`
    - `build_ppo_training_config`
-4. If the environment needs visualization, prefer `LiveRenderServer` plus `renderer/server`
-   routes over a per-env `render.py`.
+4. If the environment needs visualization, write replay JSON that the shared `renderer/` app can
+   load and render in the browser.
 
 Use `simverse.envs.scaffold.missing_required_files` to validate package completeness.

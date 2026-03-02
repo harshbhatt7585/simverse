@@ -1,7 +1,7 @@
 import contextlib
 import random
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -9,7 +9,7 @@ import torch
 from simverse.core.agent import SimAgent
 from simverse.core.env import SimEnv
 from simverse.core.trainer import Trainer
-from simverse.logging_config import get_logger, training_logger
+from simverse.logging_config import training_logger
 from simverse.training.stats import TrainingStats
 from simverse.utils.replay_buffer import Experience, ReplayBuffer
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
@@ -21,7 +21,6 @@ try:
 except ImportError:
     wandb = None
     _WANDB_AVAILABLE = False
-logger = get_logger(__name__)
 
 
 class PPOTrainer(Trainer):
@@ -44,7 +43,6 @@ class PPOTrainer(Trainer):
         project_name: str = DEFAULT_WANDB_PROJECT,
         run_name: str = "ppo-training",
         episode_save_dir: str | None = None,
-        frame_sink: Callable[[Dict[str, Any]], None] | None = None,
         device: Union[torch.device, str] = "cpu",
         batch_size: int = DEFAULT_BATCH_SIZE,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
@@ -77,7 +75,6 @@ class PPOTrainer(Trainer):
         self._wandb_initialized = False
         self.use_wandb = use_wandb
         self.episode_save_dir = episode_save_dir
-        self.frame_sink = frame_sink
         self._env_metadata_cache: Dict[str, Any] | None = None
         self.device = torch.device(device)
         self.batch_size = batch_size
@@ -114,16 +111,9 @@ class PPOTrainer(Trainer):
         self._tensor_buffer_capacity = 0
         self._tensor_obs_shape: tuple[int, ...] | None = None
 
-    def _handle_frame_record(self, frame_record: Dict[str, Any]) -> None:
+    def _record_frame(self, frame_record: Dict[str, Any]) -> None:
         if self.episode_save_dir:
             self.stats.record_frame(frame_record)
-        if self.frame_sink is None:
-            return
-        try:
-            self.frame_sink(frame_record)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("Frame sink failed; disabling live render. Error: %s", exc)
-            self.frame_sink = None
 
     def _get_optimizer(self, agent_id: int) -> torch.optim.Optimizer:
         if self.optimizers:
@@ -874,7 +864,7 @@ class PPOTrainer(Trainer):
             self.env_batch_size = self._batch_size_from_obs(obs)
             self.stats.set_env_count(self.env_batch_size)
             record_env_idx: Optional[int]
-            if self.episode_save_dir or self.frame_sink:
+            if self.episode_save_dir:
                 record_env_idx = random.randrange(max(self.env_batch_size, 1))
             else:
                 record_env_idx = None
@@ -952,7 +942,7 @@ class PPOTrainer(Trainer):
                     reward_tensor = self._reward_to_tensor(reward, batch_envs)
                     done_tensor = self._done_to_tensor(done, batch_envs)
 
-                    if (self.episode_save_dir or self.frame_sink) and record_env_idx is not None:
+                    if self.episode_save_dir and record_env_idx is not None:
                         env_to_record = min(record_env_idx, batch_envs - 1)
                         info_env = self._extract_info_for_env(info, env_to_record)
                         frame_obs = self._extract_env_observation(obs, env_to_record)
@@ -972,7 +962,7 @@ class PPOTrainer(Trainer):
                             step + 1,
                             bool(done_tensor[env_to_record].item()),
                         )
-                        self._handle_frame_record(frame_record)
+                        self._record_frame(frame_record)
 
                     obs_batch = obs_tensor.detach()
                     done_batch = done_tensor.detach()
@@ -1103,7 +1093,7 @@ class PPOTrainer(Trainer):
                     done_array_cpu = done_array
                 info_list = self._ensure_info_list(info, batch_envs)
 
-                if (self.episode_save_dir or self.frame_sink) and record_env_idx is not None:
+                if self.episode_save_dir and record_env_idx is not None:
                     env_to_record = min(record_env_idx, batch_envs - 1)
                     frame_obs = self._extract_env_observation(obs, env_to_record)
                     frame_reward = self._reward_row_to_dict(reward_array_cpu[env_to_record])
@@ -1123,7 +1113,7 @@ class PPOTrainer(Trainer):
                         step + 1,
                         bool(done_array_cpu[env_to_record]),
                     )
-                    self._handle_frame_record(frame_record)
+                    self._record_frame(frame_record)
 
                 for env_idx in range(batch_envs):
                     env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
