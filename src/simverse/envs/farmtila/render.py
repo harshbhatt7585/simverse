@@ -16,10 +16,9 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(_src))
 
 import pygame
-
 from simverse.envs.farmtila.config import FarmtilaConfig
 from simverse.envs.farmtila.env import FarmtilaEnv
-from simverse.render_cli import build_render_parser
+from simverse.render.cli import build_render_parser
 
 
 @dataclass
