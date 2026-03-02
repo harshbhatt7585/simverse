@@ -16,16 +16,6 @@ class Experience:
     info: Dict[str, Any]
 
 
-@dataclass
-class Episode:
-    experiences: List[Experience]
-
-
-@dataclass
-class Trajectory:
-    episodes: List[Episode]
-
-
 class ReplayBuffer:
     def __init__(self, max_size: int = 10000):
         self.max_size = max_size
