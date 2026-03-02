@@ -8,15 +8,15 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-from simverse.abstractor.train_utils import (
+from simverse.core.agent import SimAgent
+from simverse.envs.gym_env.env import GymEnv, GymTorchConfig, create_env, observation_batch_to_chw
+from simverse.training.utils import (
     build_ppo_training_config,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
     run_ppo_training,
 )
-from simverse.core.agent import SimAgent
-from simverse.envs.gym_env.env import GymEnv, GymTorchConfig, create_env, observation_batch_to_chw
 
 
 class GymMLPPolicy(nn.Module):

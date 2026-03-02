@@ -3,11 +3,11 @@ from __future__ import annotations
 import random
 
 import torch
-from simverse.abstractor.train_utils import run_ppo_training
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig, build_training_config
 from simverse.envs.farmtila.env import FarmtilaEnv, create_env
 from simverse.policies.simple import SimplePolicy
+from simverse.training.utils import run_ppo_training
 
 
 def agent_factory(agent_id: int, policy: torch.nn.Module, env: FarmtilaEnv) -> FarmtilaAgent:

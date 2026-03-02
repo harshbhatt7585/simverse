@@ -3,18 +3,18 @@ from __future__ import annotations
 import numpy as np
 import torch
 from simverse.abstractor.live_render_server import LiveRenderServer
-from simverse.abstractor.train_utils import (
+from simverse.envs.maze_race.agent import MazeRaceAgent
+from simverse.envs.maze_race.config import MazeRaceConfig
+from simverse.envs.maze_race.env import MazeRaceEnv, create_env
+from simverse.logging_config import training_logger
+from simverse.policies.simple import SimplePolicy
+from simverse.training.utils import (
     build_ppo_training_config,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
     run_ppo_training,
 )
-from simverse.envs.maze_race.agent import MazeRaceAgent
-from simverse.envs.maze_race.config import MazeRaceConfig
-from simverse.envs.maze_race.env import MazeRaceEnv, create_env
-from simverse.logging_config import training_logger
-from simverse.policies.simple import SimplePolicy
 
 
 def agent_factory(agent_id: int, policy: torch.nn.Module, env: MazeRaceEnv) -> MazeRaceAgent:

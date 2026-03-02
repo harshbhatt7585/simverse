@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import numpy as np
 import torch.nn as nn
-from simverse.abstractor.train_utils import (
+from simverse.envs.battle_grid.agent import BattleGridAgent
+from simverse.envs.battle_grid.config import BattleGridConfig
+from simverse.envs.battle_grid.env import BattleGridEnv, create_env
+from simverse.policies.simple import SimplePolicy
+from simverse.training.utils import (
     build_ppo_training_config,
     configure_torch_backend,
     resolve_rollout_dtype,
     resolve_torch_device,
     run_ppo_training,
 )
-from simverse.envs.battle_grid.agent import BattleGridAgent
-from simverse.envs.battle_grid.config import BattleGridConfig
-from simverse.envs.battle_grid.env import BattleGridEnv, create_env
-from simverse.policies.simple import SimplePolicy
 
 
 def agent_factory(agent_id: int, policy: nn.Module, env: BattleGridEnv) -> BattleGridAgent:

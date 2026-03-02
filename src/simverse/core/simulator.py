@@ -10,7 +10,7 @@ from torch.distributions import Categorical
 from simverse.core.agent import SimAgent
 from simverse.core.env import SimEnv
 from simverse.core.trainer import Trainer
-from simverse.utils.checkpointer import Checkpointer
+from simverse.training.checkpoints import Checkpointer
 
 AgentFactory = Callable[[int, nn.Module, SimEnv], SimAgent]
 

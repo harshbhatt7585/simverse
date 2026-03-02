@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from simverse.utils.checkpointer import Checkpointer
+from simverse.training.checkpoints import Checkpointer
 
 
 class Trainer(ABC):
