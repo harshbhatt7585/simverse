@@ -3,3 +3,5 @@ wandb/
 checkpoints/
 .env
 recordings/
+.ruff_cache
+.venv-agent
