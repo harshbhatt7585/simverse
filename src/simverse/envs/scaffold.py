@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REQUIRED_ENV_FILES: tuple[str, ...] = ("env.py", "train.py", "render.py")
+REQUIRED_ENV_FILES: tuple[str, ...] = ("env.py", "train.py")
 
 
 def missing_required_files(package_dir: Path) -> list[str]:
