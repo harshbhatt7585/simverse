@@ -6,7 +6,7 @@ from typing import Any, Dict, Sequence, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simenv import SimEnv
+from simverse.core.env import SimEnv
 
 # Gymnasium releases that still use np.float_ break on NumPy 2.x; restore alias for compatibility.
 if not hasattr(np, "float_"):

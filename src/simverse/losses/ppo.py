@@ -5,10 +5,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import torch
-from simverse.abstractor.agent import SimAgent
-from simverse.abstractor.simenv import SimEnv
-from simverse.abstractor.trainer import Trainer
 from simverse.agent.stats import TrainingStats
+from simverse.core.agent import SimAgent
+from simverse.core.env import SimEnv
+from simverse.core.trainer import Trainer
 from simverse.logging_config import get_logger, training_logger
 from simverse.utils.replay_buffer import Experience, ReplayBuffer
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT

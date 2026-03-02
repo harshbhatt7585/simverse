@@ -5,7 +5,7 @@ from typing import Any, Dict, Sequence, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simenv import SimEnv
+from simverse.core.env import SimEnv
 from simverse.envs.snake.agent import SnakeAgent
 from simverse.envs.snake.config import SnakeConfig
 

@@ -5,7 +5,7 @@ from typing import Any, Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simenv import SimEnv
+from simverse.core.env import SimEnv
 from simverse.envs.farmtila.agent import FarmtilaAgent
 from simverse.envs.farmtila.config import FarmtilaConfig
 

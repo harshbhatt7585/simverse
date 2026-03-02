@@ -1,7 +1,7 @@
 import os
 import pickle
 
-from simverse.abstractor.simenv import SimEnv
+from simverse.core.env import SimEnv
 
 
 class Checkpointer:

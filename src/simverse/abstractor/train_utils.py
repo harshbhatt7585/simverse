@@ -7,8 +7,8 @@ from typing import Any, Callable, Dict, Mapping, Sequence
 import torch
 
 from simverse.agent.stats import TrainingStats
+from simverse.core.simulator import Simulator
 from simverse.losses.ppo import PPOTrainer
-from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 

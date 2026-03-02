@@ -1,8 +1,9 @@
 """Public package exports for the current Simverse surface."""
 
-from simverse.abstractor.agent import SimAgent
-from simverse.abstractor.simenv import SimEnv
-from simverse.abstractor.trainer import Trainer
+from simverse.core.agent import SimAgent
+from simverse.core.env import SimEnv
+from simverse.core.simulator import Simulator
+from simverse.core.trainer import Trainer
 from simverse.envs import (
     BattleGridConfig,
     BattleGridEnv,
@@ -23,7 +24,6 @@ from simverse.envs import (
 )
 from simverse.policies import CentralizedCritic, RandomPolicy, SimplePolicy
 from simverse.recipes import quicktrain
-from simverse.simulator import Simulator
 
 __all__ = [
     "BattleGridConfig",

@@ -5,7 +5,7 @@ from typing import Any, Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from simverse.abstractor.simenv import SimEnv
+from simverse.core.env import SimEnv
 from simverse.envs.maze_race.agent import MazeRaceAgent
 from simverse.envs.maze_race.config import MazeRaceConfig
 

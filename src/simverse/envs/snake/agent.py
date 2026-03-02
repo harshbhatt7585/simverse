@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
-from simverse.abstractor.agent import SimAgent
+from simverse.core.agent import SimAgent
 
 if TYPE_CHECKING:
     from torch.nn import Module
