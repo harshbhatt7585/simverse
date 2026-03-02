@@ -43,11 +43,11 @@ simverse rollout --env-id CartPole-v1 --episodes 5 --max-steps 200
    Note: the Atari dependency stack currently requires Python `<3.13`.
 3. Install the Git hooks so Ruff runs automatically:
    ```bash
-   pre-commit install
+   pre-commit install -c tooling/pre-commit-config.yaml
    ```
 4. Run the hooks on demand (useful for CI or after large refactors):
    ```bash
-   pre-commit run --all-files
+   pre-commit run --all-files -c tooling/pre-commit-config.yaml
    ```
 
 ## UV Setup (Recommended)
