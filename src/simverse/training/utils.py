@@ -9,7 +9,7 @@ import torch
 from simverse.core.simulator import Simulator
 from simverse.training.ppo import PPOTrainer
 from simverse.training.stats import TrainingStats
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
+from simverse.training.wandb import DEFAULT_WANDB_PROJECT
 
 
 @dataclass

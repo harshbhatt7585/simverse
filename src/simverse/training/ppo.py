@@ -9,10 +9,10 @@ import torch
 from simverse.core.agent import SimAgent
 from simverse.core.env import SimEnv
 from simverse.core.trainer import Trainer
-from simverse.logging_config import training_logger
+from simverse.training.logging import training_logger
 from simverse.training.stats import TrainingStats
+from simverse.training.wandb import DEFAULT_WANDB_PROJECT
 from simverse.utils.replay_buffer import Experience, ReplayBuffer
-from simverse.wandb_config import DEFAULT_WANDB_PROJECT
 
 try:
     import wandb
