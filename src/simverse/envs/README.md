@@ -15,7 +15,7 @@ stack instead.
 2. `env.py` exposes:
    - a canonical `*Env` alias for the torch implementation
    - `create_env(...)` factory
-3. `train.py` uses shared helpers from `simverse.abstractor.train_utils`:
+3. `train.py` uses shared helpers from `simverse.training.utils`:
    - `resolve_torch_device`
    - `resolve_rollout_dtype`
    - `configure_torch_backend`
