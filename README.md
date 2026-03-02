@@ -2,42 +2,27 @@
 
 ![Simverse Logo](docs/images/simverse_logo.png)
 
-Simverse is an RL library which contain pre-built ENVS, policies, and recipes. It is designed to learn and get started with experimenting RL.
+Simverse is a torch-native RL playground with built-in environments, policies, and PPO training utilities.
 
-## Abstraction Classes
-- `AgentSpec` — creates the agent
-- `ENVSpec` — creates the env
-- `PolicySpec` — creates a policy
-- `Simulator` - Upper level class to run/train the simulation
+## Current Package Surface
+- `SimEnv`, `SimAgent`, `Trainer`, and `Simulator` are the core abstractions.
+- Built-in environments: `battle_grid`, `farmtila`, `gym_env`, `maze_race`, and `snake`.
+- Built-in policies: `SimplePolicy`, `RandomPolicy`, and `CentralizedCritic`.
 
-## Agent
-1. Agent plays/takes action in the simulation.
-2. Each agent has their own policy.
-3. Agent can takes action given action space.
-
-## ENV
-1. A universe where the simulation runs.
-2. ENV contains multiple trainable agents and NPCs.
-3. ENV has their own rules, where agent can learn follow rules to live and win.
-
-## Policy
-1. policy is an core brain of a agent.
-2. An trainable agent can hold a policy, NPCs have no policy.
-3. policy is the core neural network of a agent which help them to learn the ENV.
-4. policy can be any neural network like Transformers, LLM, CNN, RNN, LSTM, World Models, etc.
-
-## How to Use (development)
-Create a simulator with your environment, policies, and agent count, then kick off training:
+## Quickstart
+Use the lightweight rollout helper against any Gymnasium discrete-action environment:
 
 ```python
-from simverse.simulator import Simulator
+from simverse import quicktrain
 
-sim = Simulator(env="farmtila", num_agents=10, policies=["simple", "transformer"])
-sim.train(
-    loss="ppo",
-    optimizer="adam",
-    epochs=100,
-)
+stats = quicktrain(env_id="CartPole-v1", episodes=5, max_steps=200)
+print(stats)
+```
+
+The same helper is available via the package CLI:
+
+```bash
+simverse rollout --env-id CartPole-v1 --episodes 5 --max-steps 200
 ```
 
 ## Development Setup
@@ -79,52 +64,15 @@ You can also run directly with `uv`:
 - `uv sync --extra pettingzoo` (base + PettingZoo)
 - `uv sync --extra dev --extra pettingzoo` (all)
 
-## Shape Draw Env
-Train a visual agent that draws target shapes on a canvas:
+## Training Entrypoints
+Each environment exposes a Python `train(...)` function. The most direct way to use them today is from Python:
 
-```bash
-python -m simverse.envs.shape_draw.train --num-envs 64 --wandb off
+```python
+from simverse.envs.gym_env.train import train as train_gym
+from simverse.envs.snake.train import train as train_snake
+
+train_gym(env_id="CartPole-v1", num_envs=512, episodes=120, use_wandb=False)
+train_snake(num_envs=512, episodes=200, use_wandb=False)
 ```
 
-Render and control one environment on screen:
-- Arrow keys move the pen
-- `Space` toggles pen up/down
-- `Q`/`E` decrease/increase brush size
-- `R` resets
-
-```bash
-python -m simverse.envs.shape_draw.render --size 64 --scale 6 --fps 20
-```
-
-## Gym Env (Torch Fastpath)
-Train a Gymnasium discrete-action env (default `CartPole-v1`) through the torch fastpath:
-
-```bash
-python -m simverse.envs.gym_env.train --env-id CartPole-v1 --num-envs 512 --episodes 120
-```
-
-Enable W&B logging:
-
-```bash
-python -m simverse.envs.gym_env.train --env-id CartPole-v1 --wandb on
-```
-
-Render random or checkpointed rollouts, with optional MP4 recording:
-
-```bash
-python -m simverse.envs.gym_env.render --env-id CartPole-v1 --episodes 3 --record on
-```
-
-## Snake Env
-Train the built-in Snake torch environment:
-
-```bash
-python -m simverse.envs.snake.train --num-envs 512 --episodes 200 --wandb off
-```
-
-Render Snake with manual controls (arrow keys) or policy checkpoint:
-
-```bash
-python -m simverse.envs.snake.render --mode manual --episodes 3
-python -m simverse.envs.snake.render --mode policy --checkpoint /path/to/snake_checkpoint.pth
-```
+`farmtila`, `maze_race`, and `battle_grid` follow the same pattern.
