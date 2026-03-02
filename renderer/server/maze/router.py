@@ -7,5 +7,4 @@ router = create_game_router(
     tag="maze",
     replay_env_var="MAZE_REPLAY_DIR",
     default_replay_dir="recordings/maze_race",
-    stream_key="maze",
 )

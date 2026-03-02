@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-
-from server.live.stream import live_stream_registry
 
 
 def _read_json(path: Path) -> Any:
@@ -22,7 +19,6 @@ def create_game_router(
     tag: str,
     replay_env_var: str,
     default_replay_dir: str,
-    stream_key: str,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
 
@@ -43,58 +39,11 @@ def create_game_router(
     @router.get("/snapshot")
     def get_snapshot() -> dict[str, Any]:
         files = all_replay_files()
-        live_snapshot = live_stream_registry.get(stream_key).snapshot()
         return {
             "replay_dir": str(replay_dir()),
             "replay_count": len(files),
             "latest_replay": files[-1].name if files else None,
-            "live": live_snapshot,
         }
-
-    @router.get("/events")
-    @router.get("/live/events")
-    def get_events() -> StreamingResponse:
-        stream = live_stream_registry.get(stream_key)
-
-        def event_stream():
-            subscriber = stream.subscribe()
-            try:
-                while True:
-                    yield stream.next_event(subscriber)
-            finally:
-                stream.unsubscribe(subscriber)
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    @router.post("/live/meta")
-    def post_live_meta(payload: dict[str, Any]) -> dict[str, Any]:
-        metadata = payload.get("metadata")
-        if not isinstance(metadata, dict):
-            if isinstance(payload, dict):
-                metadata = payload
-            else:
-                raise HTTPException(status_code=400, detail="metadata must be a JSON object")
-        published = live_stream_registry.get(stream_key).publish_meta(metadata)
-        return {"status": "ok", **published}
-
-    @router.post("/live/frame")
-    def post_live_frame(payload: dict[str, Any]) -> dict[str, Any]:
-        frame = payload.get("frame")
-        if not isinstance(frame, dict):
-            if isinstance(payload, dict):
-                frame = payload
-            else:
-                raise HTTPException(status_code=400, detail="frame must be a JSON object")
-        published = live_stream_registry.get(stream_key).publish_frame(frame)
-        return {"status": "ok", **published}
 
     @router.get("/replays")
     @router.get("/replays/")

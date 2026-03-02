@@ -7,5 +7,4 @@ router = create_game_router(
     tag="snake",
     replay_env_var="SNAKE_REPLAY_DIR",
     default_replay_dir="recordings/snake",
-    stream_key="snake",
 )
