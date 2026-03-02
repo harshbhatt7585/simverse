@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Sequence
 
 import torch
 
 from simverse.agent.stats import TrainingStats
-from simverse.config.policy import PolicySpec
 from simverse.losses.ppo import PPOTrainer
 from simverse.simulator import Simulator
 from simverse.wandb_config import DEFAULT_WANDB_PROJECT
+
+
+@dataclass
+class PolicySpec:
+    name: str
+    model: torch.nn.Module
 
 
 def resolve_torch_device(*, prefer_mps: bool = True) -> str:
