@@ -1,6 +1,7 @@
 import contextlib
 import random
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
@@ -21,6 +22,22 @@ try:
 except ImportError:
     wandb = None
     _WANDB_AVAILABLE = False
+
+
+@dataclass
+class RolloutProgress:
+    training_start: float
+    paused_time: float = 0.0
+    last_active_time: float = 0.0
+    total_agent_steps: int = 0
+    last_logged_steps: int = 0
+
+
+@dataclass
+class EpisodeSummary:
+    total_reward: float
+    agent_rewards: np.ndarray
+    steps: int
 
 
 class PPOTrainer(Trainer):
@@ -218,6 +235,29 @@ class PPOTrainer(Trainer):
             "info": info,
             "done": bool(done),
         }
+
+    def _record_episode_step(
+        self,
+        *,
+        observation: Dict[str, Any],
+        actions: Dict[int, int],
+        reward_row: Any,
+        info: Dict[str, Any],
+        episode: int,
+        step: int,
+        done: bool,
+        env_idx: int,
+    ) -> None:
+        frame_record = self._build_frame_record(
+            self._extract_env_observation(observation, env_idx),
+            actions,
+            self._reward_row_to_dict(reward_row),
+            info,
+            episode,
+            step,
+            done,
+        )
+        self._record_frame(frame_record)
 
     def _obs_batch_array(self, observation: Dict[str, Any]) -> np.ndarray | torch.Tensor:
         obs_array = observation.get("obs")
@@ -568,28 +608,6 @@ class PPOTrainer(Trainer):
             self._tensor_buffer_sizes[agent_id] + batch_size,
         )
 
-    def _tensor_buffer_sample(
-        self, agent_id: int, batch_size: int
-    ) -> Dict[str, torch.Tensor] | None:
-        buffer = self._tensor_buffers.get(agent_id)
-        if buffer is None:
-            return None
-        current_size = self._tensor_buffer_sizes.get(agent_id, 0)
-        if current_size <= 0:
-            return None
-        sample_size = min(current_size, batch_size)
-        capacity = self._tensor_buffer_capacity
-        ptr = self._tensor_buffer_ptrs.get(agent_id, 0)
-        # Read the most recent contiguous window in chronological order.
-        start = (ptr - sample_size) % capacity
-        if start + sample_size <= capacity:
-            sample_indices = torch.arange(start, start + sample_size, device=self.device)
-        else:
-            first = torch.arange(start, capacity, device=self.device)
-            second = torch.arange(0, (start + sample_size) % capacity, device=self.device)
-            sample_indices = torch.cat((first, second), dim=0)
-        return {key: value.index_select(0, sample_indices) for key, value in buffer.items()}
-
     def _reset_tensor_buffers(self) -> None:
         for agent in self.agents:
             agent_id = agent.agent_id
@@ -829,6 +847,382 @@ class PPOTrainer(Trainer):
             advantages[step] = gae
         return advantages.reshape(-1)
 
+    def _log_rollout_progress(
+        self,
+        *,
+        step: int,
+        batch_envs: int,
+        competitive_zero_sum: bool,
+        episode_reward: float,
+        episode_agent_reward: np.ndarray,
+        progress: RolloutProgress,
+    ) -> None:
+        if (step + 1) % 100 != 0 and step != self.env.config.max_steps - 1:
+            return
+
+        active_time = max(
+            time.perf_counter() - progress.training_start - progress.paused_time,
+            1e-8,
+        )
+        delta_steps = progress.total_agent_steps - progress.last_logged_steps
+        delta_time = max(active_time - progress.last_active_time, 1e-8)
+        steps_per_sec = delta_steps / delta_time
+        progress.last_active_time = active_time
+        progress.last_logged_steps = progress.total_agent_steps
+
+        if competitive_zero_sum:
+            reward_per_env = float(episode_agent_reward[0]) / max(batch_envs, 1)
+        else:
+            reward_per_env = episode_reward / max(batch_envs, 1)
+        training_logger.log_step(
+            step + 1,
+            self.env.config.max_steps,
+            {
+                "rewards": reward_per_env,
+                "steps_per_sec": round(steps_per_sec, 2),
+            },
+        )
+
+    def _run_fastpath_episode(
+        self,
+        *,
+        episode: int,
+        obs: Dict[str, Any],
+        record_env_idx: int | None,
+        competitive_zero_sum: bool,
+        progress: RolloutProgress,
+    ) -> EpisodeSummary:
+        episode_reward = torch.zeros((), dtype=torch.float32, device=self.device)
+        episode_agent_reward = torch.zeros(
+            (self.env.config.num_agents,),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        episode_steps = 0
+
+        for step in range(self.env.config.max_steps):
+            obs_tensor = self._prepare_obs_tensor(obs)
+            batch_envs = obs_tensor.shape[0]
+            local_obs_tensor = self._prepare_local_obs_tensor(obs, batch_envs)
+
+            if self.use_ctde:
+                self._ensure_tensor_buffers(
+                    tuple(local_obs_tensor.shape[2:]),
+                    global_obs_shape=tuple(obs_tensor.shape[1:]),
+                )
+            else:
+                self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
+
+            collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
+            env_actions = torch.zeros(
+                (batch_envs, self.env.config.num_agents),
+                dtype=torch.int64,
+                device=self.env.device,
+            )
+
+            for agent in self.agents:
+                agent.policy.eval()
+
+            with torch.no_grad():
+                centralized_values: torch.Tensor | None = None
+                if self.use_ctde:
+                    centralized_values = self._critic_value(obs_tensor).squeeze(-1).detach()
+                for agent in self.agents:
+                    actor_obs = local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
+                    with self._autocast_context():
+                        logits, value = agent.policy(actor_obs)
+                    logits_f32 = logits.to(dtype=torch.float32)
+                    if not bool(torch.isfinite(logits_f32).all().item()):
+                        raise RuntimeError("Non-finite logits detected during action sampling")
+                    dist = torch.distributions.Categorical(logits=logits_f32)
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action).to(dtype=torch.float32)
+
+                    collected_agent_data[agent.agent_id] = {
+                        "action": action.detach(),
+                        "log_prob": log_prob.detach(),
+                        "value": (
+                            centralized_values.to(dtype=torch.float32)
+                            if centralized_values is not None
+                            else value.squeeze(-1).detach().to(dtype=torch.float32)
+                        ),
+                    }
+                    env_actions[:, agent.agent_id] = action.detach()
+
+            obs, reward, done, info = self.env.step(env_actions)
+            reward_tensor = self._reward_to_tensor(reward, batch_envs)
+            done_tensor = self._done_to_tensor(done, batch_envs)
+
+            if record_env_idx is not None:
+                env_to_record = min(record_env_idx, batch_envs - 1)
+                frame_actions = {
+                    agent_id: int(agent_data["action"][env_to_record].item())
+                    for agent_id, agent_data in collected_agent_data.items()
+                }
+                self._record_episode_step(
+                    observation=obs,
+                    actions=frame_actions,
+                    reward_row=reward_tensor[env_to_record].detach().float().cpu().numpy(),
+                    info=self._extract_info_for_env(info, env_to_record),
+                    episode=episode + 1,
+                    step=step + 1,
+                    done=bool(done_tensor[env_to_record].item()),
+                    env_idx=env_to_record,
+                )
+
+            obs_batch = obs_tensor.detach()
+            done_batch = done_tensor.detach()
+            for agent_id, agent_data in collected_agent_data.items():
+                actor_obs_batch = local_obs_tensor[:, agent_id].detach() if self.use_ctde else obs_batch
+                self._tensor_buffer_add(
+                    agent_id,
+                    obs=actor_obs_batch,
+                    global_obs=obs_batch if self.use_ctde else None,
+                    action=agent_data["action"],
+                    log_prob=agent_data["log_prob"],
+                    value=agent_data["value"],
+                    reward=reward_tensor[:, agent_id].detach(),
+                    done=done_batch,
+                )
+            self.stats.step(batch_envs)
+
+            episode_reward += reward_tensor.sum()
+            episode_agent_reward += reward_tensor.sum(dim=0)
+            episode_steps = step + 1
+            progress.total_agent_steps += batch_envs * max(len(self.agents), 1)
+
+            self._log_rollout_progress(
+                step=step,
+                batch_envs=batch_envs,
+                competitive_zero_sum=competitive_zero_sum,
+                episode_reward=float(episode_reward.item()),
+                episode_agent_reward=episode_agent_reward.detach().float().cpu().numpy(),
+                progress=progress,
+            )
+
+            if bool(done_tensor.all().item()):
+                break
+
+        return EpisodeSummary(
+            total_reward=float(episode_reward.item()),
+            agent_rewards=episode_agent_reward.detach().float().cpu().numpy(),
+            steps=episode_steps,
+        )
+
+    def _run_legacy_episode(
+        self,
+        *,
+        episode: int,
+        obs: Dict[str, Any],
+        record_env_idx: int | None,
+        competitive_zero_sum: bool,
+        progress: RolloutProgress,
+    ) -> EpisodeSummary:
+        if self.use_ctde:
+            raise RuntimeError(
+                "CTDE currently requires torch fastpath. Set config['torch_fastpath']=True."
+            )
+
+        episode_reward = 0.0
+        episode_agent_reward = np.zeros((self.env.config.num_agents,), dtype=np.float64)
+        episode_steps = 0
+
+        for step in range(self.env.config.max_steps):
+            obs_tensor = self._prepare_obs_tensor(obs)
+            batch_envs = obs_tensor.shape[0]
+
+            actions_per_env: List[Dict[int, int]] | None = None
+            action_tensors: List[torch.Tensor] = []
+            if not isinstance(self.env, SimEnv):
+                actions_per_env = [{} for _ in range(batch_envs)]
+            collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
+
+            for agent in self.agents:
+                agent.policy.eval()
+                with torch.no_grad():
+                    with self._autocast_context():
+                        logits, value = agent.policy(obs_tensor)
+                    logits_f32 = logits.to(dtype=torch.float32)
+                    if not bool(torch.isfinite(logits_f32).all().item()):
+                        raise RuntimeError("Non-finite logits detected during action sampling")
+                    dist = torch.distributions.Categorical(logits=logits_f32)
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action).to(dtype=torch.float32)
+
+                collected_agent_data[agent.agent_id] = {
+                    "action": action,
+                    "log_prob": log_prob,
+                    "value": value.squeeze(-1).to(dtype=torch.float32),
+                }
+
+                if isinstance(self.env, SimEnv):
+                    action_tensors.append(action)
+                else:
+                    action_cpu = action.detach().cpu()
+                    for env_idx in range(batch_envs):
+                        actions_per_env[env_idx][agent.agent_id] = int(action_cpu[env_idx].item())
+
+            env_actions: Union[Sequence[Dict[int, int]], Dict[int, int], torch.Tensor]
+            if isinstance(self.env, SimEnv):
+                if action_tensors:
+                    env_actions = torch.stack(action_tensors, dim=1)
+                else:
+                    env_actions = torch.zeros(
+                        (batch_envs, self.env.config.num_agents),
+                        dtype=torch.int64,
+                        device=self.env.device,
+                    )
+            elif batch_envs == 1:
+                env_actions = actions_per_env[0] if actions_per_env else {}
+            else:
+                env_actions = actions_per_env or [{} for _ in range(batch_envs)]
+
+            obs, reward, done, info = self.env.step(env_actions)
+
+            reward_array = self._reward_to_array(reward, batch_envs)
+            done_array = self._done_to_array(done, batch_envs)
+            if isinstance(reward_array, torch.Tensor):
+                reward_array_cpu = reward_array.detach().cpu().numpy()
+            else:
+                reward_array_cpu = reward_array
+            if isinstance(done_array, torch.Tensor):
+                done_array_cpu = done_array.detach().cpu().numpy()
+            else:
+                done_array_cpu = done_array
+            info_list = self._ensure_info_list(info, batch_envs)
+
+            if record_env_idx is not None:
+                env_to_record = min(record_env_idx, batch_envs - 1)
+                if isinstance(self.env, SimEnv):
+                    frame_actions = {
+                        agent.agent_id: int(collected_agent_data[agent.agent_id]["action"][env_to_record].item())
+                        for agent in self.agents
+                    }
+                else:
+                    frame_actions = actions_per_env[env_to_record] if actions_per_env else {}
+                self._record_episode_step(
+                    observation=obs,
+                    actions=frame_actions,
+                    reward_row=reward_array_cpu[env_to_record],
+                    info=info_list[env_to_record],
+                    episode=episode + 1,
+                    step=step + 1,
+                    done=bool(done_array_cpu[env_to_record]),
+                    env_idx=env_to_record,
+                )
+
+            for env_idx in range(batch_envs):
+                env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
+                env_done = bool(done_array_cpu[env_idx])
+                env_info = info_list[env_idx]
+                for agent_id, agent_data in collected_agent_data.items():
+                    reward_value = float(reward_array_cpu[env_idx, agent_id])
+                    experience = Experience(
+                        agent_id=agent_id,
+                        observation=env_obs,
+                        action=agent_data["action"][env_idx].unsqueeze(0).detach(),
+                        log_prob=agent_data["log_prob"][env_idx].unsqueeze(0).detach(),
+                        value=agent_data["value"][env_idx].unsqueeze(0).detach(),
+                        reward=reward_value,
+                        done=env_done,
+                        info=env_info,
+                    )
+                    self.replay_buffer.add(experience)
+                    self.stats.push_experience(experience)
+            self.stats.step(batch_envs)
+
+            episode_reward += float(np.sum(reward_array_cpu))
+            episode_agent_reward += reward_array_cpu.sum(axis=0, dtype=np.float64)
+            episode_steps = step + 1
+            progress.total_agent_steps += batch_envs * max(len(self.agents), 1)
+
+            self._log_rollout_progress(
+                step=step,
+                batch_envs=batch_envs,
+                competitive_zero_sum=competitive_zero_sum,
+                episode_reward=episode_reward,
+                episode_agent_reward=episode_agent_reward,
+                progress=progress,
+            )
+
+            if bool(np.all(done_array_cpu)):
+                break
+
+        return EpisodeSummary(
+            total_reward=episode_reward,
+            agent_rewards=episode_agent_reward,
+            steps=episode_steps,
+        )
+
+    def _update_agent_from_replay_buffer(self, agent: SimAgent) -> None:
+        agent.policy.train()
+
+        for epoch in range(self.training_epochs):
+            trajectory = self.replay_buffer.sample_for_agent(agent.agent_id, self.batch_size)
+            if not trajectory:
+                break
+
+            observations = [exp.observation for exp in trajectory]
+            rewards = [
+                sum(exp.reward.values()) if isinstance(exp.reward, dict) else exp.reward
+                for exp in trajectory
+            ]
+            values = [exp.value.squeeze().item() for exp in trajectory]
+            dones = [exp.done if isinstance(exp.done, bool) else bool(exp.done) for exp in trajectory]
+
+            with torch.no_grad():
+                _, next_value = agent.policy(observations[-1])
+                next_value = next_value.squeeze().item()
+
+            advantages = self.compute_gae(rewards, values, next_value, dones).to(self.device)
+            returns = advantages + torch.tensor(values, dtype=torch.float32, device=self.device)
+            policy_loss_value = 0.0
+            value_loss_value = 0.0
+
+            for i, exp in enumerate(trajectory):
+                with self._autocast_context():
+                    logits, value = agent.policy(exp.observation)
+                logits_f32 = logits.to(dtype=torch.float32)
+                if not bool(torch.isfinite(logits_f32).all().item()):
+                    raise RuntimeError("Non-finite logits detected during PPO update")
+                dist = torch.distributions.Categorical(logits=logits_f32)
+                log_prob = dist.log_prob(exp.action)
+
+                ratio = torch.exp(
+                    log_prob.to(dtype=torch.float32) - exp.log_prob.to(dtype=torch.float32)
+                )
+
+                adv = advantages[i]
+                surr1 = ratio * adv
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * adv
+                policy_loss = -torch.min(surr1, surr2).mean()
+
+                value_loss = (
+                    0.5
+                    * (returns[i] - value.squeeze().to(dtype=torch.float32))
+                    .pow(2)
+                    .mean()
+                )
+
+                loss = policy_loss + 0.5 * value_loss
+                optimizer = self._get_optimizer(agent.agent_id)
+                self._optimizer_step(optimizer, loss, agent.policy)
+                policy_loss_value = float(policy_loss.item())
+                value_loss_value = float(value_loss.item())
+
+            training_logger.log_epoch(
+                epoch,
+                self.training_epochs,
+                policy_loss_value,
+                value_loss_value,
+            )
+            self.stats.push_agent_losses(
+                agent.agent_id,
+                policy_loss_value,
+                value_loss_value,
+            )
+            self.stats.log_wandb(step=self.stats.steps)
+
     def train(
         self,
         env: SimEnv,
@@ -847,11 +1241,7 @@ class PPOTrainer(Trainer):
             training_logger.info(f"Torch fastpath {mode}")
 
         training_logger.start_training(self.episodes)
-        training_start = time.perf_counter()
-        paused_time = 0.0
-        last_active_time = 0.0
-        total_agent_steps = 0
-        last_logged_steps = 0
+        progress = RolloutProgress(training_start=time.perf_counter())
 
         for episode in range(self.episodes):
             training_logger.start_episode(episode + 1)
@@ -863,316 +1253,27 @@ class PPOTrainer(Trainer):
             obs = self.env.reset()
             self.env_batch_size = self._batch_size_from_obs(obs)
             self.stats.set_env_count(self.env_batch_size)
-            record_env_idx: Optional[int]
-            if self.episode_save_dir:
-                record_env_idx = random.randrange(max(self.env_batch_size, 1))
-            else:
-                record_env_idx = None
+            record_env_idx = (
+                random.randrange(max(self.env_batch_size, 1)) if self.episode_save_dir else None
+            )
             use_torch_fastpath = isinstance(self.env, SimEnv) and self.enable_torch_fastpath
             competitive_zero_sum = hasattr(self.env.config, "score_delta_reward")
-            episode_reward = 0.0
-            episode_reward_tensor = (
-                torch.zeros((), dtype=torch.float32, device=self.device)
-                if use_torch_fastpath
-                else None
-            )
-            episode_agent_reward = np.zeros((self.env.config.num_agents,), dtype=np.float64)
-            episode_agent_reward_tensor = (
-                torch.zeros((self.env.config.num_agents,), dtype=torch.float32, device=self.device)
-                if use_torch_fastpath
-                else None
-            )
-            episode_agent_steps = 0
-            episode_steps = 0
-
-            for step in range(self.env.config.max_steps):
-                obs_tensor = self._prepare_obs_tensor(obs)
-                batch_envs = obs_tensor.shape[0]
-                local_obs_tensor = self._prepare_local_obs_tensor(obs, batch_envs)
-
-                if use_torch_fastpath:
-                    if self.use_ctde:
-                        self._ensure_tensor_buffers(
-                            tuple(local_obs_tensor.shape[2:]),
-                            global_obs_shape=tuple(obs_tensor.shape[1:]),
-                        )
-                    else:
-                        self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
-                    collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
-                    env_actions = torch.zeros(
-                        (batch_envs, self.env.config.num_agents),
-                        dtype=torch.int64,
-                        device=self.env.device,
-                    )
-
-                    for agent in self.agents:
-                        agent.policy.eval()
-
-                    with torch.no_grad():
-                        centralized_values: torch.Tensor | None = None
-                        if self.use_ctde:
-                            centralized_values = self._critic_value(obs_tensor).squeeze(-1).detach()
-                        for agent in self.agents:
-                            actor_obs = (
-                                local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
-                            )
-                            with self._autocast_context():
-                                logits, value = agent.policy(actor_obs)
-                            logits_f32 = logits.to(dtype=torch.float32)
-                            if not bool(torch.isfinite(logits_f32).all().item()):
-                                raise RuntimeError(
-                                    "Non-finite logits detected during action sampling"
-                                )
-                            dist = torch.distributions.Categorical(logits=logits_f32)
-                            action = dist.sample()
-                            log_prob = dist.log_prob(action).to(dtype=torch.float32)
-
-                            collected_agent_data[agent.agent_id] = {
-                                "action": action.detach(),
-                                "log_prob": log_prob.detach(),
-                                "value": (
-                                    centralized_values.to(dtype=torch.float32)
-                                    if centralized_values is not None
-                                    else value.squeeze(-1).detach().to(dtype=torch.float32)
-                                ),
-                            }
-                            env_actions[:, agent.agent_id] = action.detach()
-
-                    obs, reward, done, info = self.env.step(env_actions)
-                    reward_tensor = self._reward_to_tensor(reward, batch_envs)
-                    done_tensor = self._done_to_tensor(done, batch_envs)
-
-                    if self.episode_save_dir and record_env_idx is not None:
-                        env_to_record = min(record_env_idx, batch_envs - 1)
-                        info_env = self._extract_info_for_env(info, env_to_record)
-                        frame_obs = self._extract_env_observation(obs, env_to_record)
-                        frame_reward = self._reward_row_to_dict(
-                            reward_tensor[env_to_record].detach().float().cpu().numpy()
-                        )
-                        frame_actions = {
-                            agent_id: int(agent_data["action"][env_to_record].item())
-                            for agent_id, agent_data in collected_agent_data.items()
-                        }
-                        frame_record = self._build_frame_record(
-                            frame_obs,
-                            frame_actions,
-                            frame_reward,
-                            info_env,
-                            episode + 1,
-                            step + 1,
-                            bool(done_tensor[env_to_record].item()),
-                        )
-                        self._record_frame(frame_record)
-
-                    obs_batch = obs_tensor.detach()
-                    done_batch = done_tensor.detach()
-                    for agent_id, agent_data in collected_agent_data.items():
-                        actor_obs_batch = (
-                            local_obs_tensor[:, agent_id].detach() if self.use_ctde else obs_batch
-                        )
-                        self._tensor_buffer_add(
-                            agent_id,
-                            obs=actor_obs_batch,
-                            global_obs=obs_batch if self.use_ctde else None,
-                            action=agent_data["action"],
-                            log_prob=agent_data["log_prob"],
-                            value=agent_data["value"],
-                            reward=reward_tensor[:, agent_id].detach(),
-                            done=done_batch,
-                        )
-                    self.stats.step(batch_envs)
-
-                    if episode_reward_tensor is not None:
-                        episode_reward_tensor += reward_tensor.sum()
-                    if episode_agent_reward_tensor is not None:
-                        episode_agent_reward_tensor += reward_tensor.sum(dim=0)
-                    episode_steps = step + 1
-
-                    steps_this_iter = batch_envs * max(len(self.agents), 1)
-                    episode_agent_steps += steps_this_iter
-                    total_agent_steps += steps_this_iter
-
-                    if (step + 1) % 100 == 0 or step == self.env.config.max_steps - 1:
-                        active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
-                        delta_steps = total_agent_steps - last_logged_steps
-                        delta_time = max(active_time - last_active_time, 1e-8)
-                        steps_per_sec = delta_steps / delta_time
-                        last_active_time = active_time
-                        last_logged_steps = total_agent_steps
-                        reward_total = (
-                            float(episode_reward_tensor.item())
-                            if episode_reward_tensor is not None
-                            else episode_reward
-                        )
-                        if competitive_zero_sum:
-                            if episode_agent_reward_tensor is not None:
-                                reward_per_env = float(episode_agent_reward_tensor[0].item()) / max(
-                                    batch_envs, 1
-                                )
-                            else:
-                                reward_per_env = float(episode_agent_reward[0]) / max(batch_envs, 1)
-                        else:
-                            reward_per_env = reward_total / max(batch_envs, 1)
-                        training_logger.log_step(
-                            step + 1,
-                            self.env.config.max_steps,
-                            {
-                                "rewards": reward_per_env,
-                                "steps_per_sec": round(steps_per_sec, 2),
-                            },
-                        )
-
-                    if bool(done_tensor.all().item()):
-                        break
-                    continue
-
-                if self.use_ctde:
-                    raise RuntimeError(
-                        "CTDE currently requires torch fastpath. Set config['torch_fastpath']=True."
-                    )
-
-                actions_per_env: List[Dict[int, int]] | None = None
-                action_tensors: List[torch.Tensor] = []
-                if not isinstance(self.env, SimEnv):
-                    actions_per_env = [{} for _ in range(batch_envs)]
-                collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
-
-                for agent in self.agents:
-                    agent.policy.eval()
-                    with torch.no_grad():
-                        with self._autocast_context():
-                            logits, value = agent.policy(obs_tensor)
-                        logits_f32 = logits.to(dtype=torch.float32)
-                        if not bool(torch.isfinite(logits_f32).all().item()):
-                            raise RuntimeError("Non-finite logits detected during action sampling")
-                        dist = torch.distributions.Categorical(logits=logits_f32)
-                        action = dist.sample()
-                        log_prob = dist.log_prob(action).to(dtype=torch.float32)
-
-                    collected_agent_data[agent.agent_id] = {
-                        "action": action,
-                        "log_prob": log_prob,
-                        "value": value.squeeze(-1).to(dtype=torch.float32),
-                    }
-
-                    if isinstance(self.env, SimEnv):
-                        action_tensors.append(action)
-                    else:
-                        action_cpu = action.detach().cpu()
-                        for env_idx in range(batch_envs):
-                            actions_per_env[env_idx][agent.agent_id] = int(
-                                action_cpu[env_idx].item()
-                            )
-
-                env_actions: Union[Sequence[Dict[int, int]], Dict[int, int], torch.Tensor]
-                if isinstance(self.env, SimEnv):
-                    if action_tensors:
-                        env_actions = torch.stack(action_tensors, dim=1)
-                    else:
-                        env_actions = torch.zeros(
-                            (batch_envs, self.env.config.num_agents),
-                            dtype=torch.int64,
-                            device=self.env.device,
-                        )
-                elif batch_envs == 1:
-                    env_actions = actions_per_env[0] if actions_per_env else {}
-                else:
-                    env_actions = actions_per_env or [{} for _ in range(batch_envs)]
-
-                obs, reward, done, info = self.env.step(env_actions)
-
-                reward_array = self._reward_to_array(reward, batch_envs)
-                done_array = self._done_to_array(done, batch_envs)
-                if isinstance(reward_array, torch.Tensor):
-                    reward_array_cpu = reward_array.detach().cpu().numpy()
-                else:
-                    reward_array_cpu = reward_array
-                if isinstance(done_array, torch.Tensor):
-                    done_array_cpu = done_array.detach().cpu().numpy()
-                else:
-                    done_array_cpu = done_array
-                info_list = self._ensure_info_list(info, batch_envs)
-
-                if self.episode_save_dir and record_env_idx is not None:
-                    env_to_record = min(record_env_idx, batch_envs - 1)
-                    frame_obs = self._extract_env_observation(obs, env_to_record)
-                    frame_reward = self._reward_row_to_dict(reward_array_cpu[env_to_record])
-                    if isinstance(self.env, SimEnv):
-                        frame_actions = {
-                            agent_id: int(action_tensors[agent_id][env_to_record].item())
-                            for agent_id in range(self.env.config.num_agents)
-                        }
-                    else:
-                        frame_actions = actions_per_env[env_to_record] if actions_per_env else {}
-                    frame_record = self._build_frame_record(
-                        frame_obs,
-                        frame_actions,
-                        frame_reward,
-                        info_list[env_to_record],
-                        episode + 1,
-                        step + 1,
-                        bool(done_array_cpu[env_to_record]),
-                    )
-                    self._record_frame(frame_record)
-
-                for env_idx in range(batch_envs):
-                    env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
-                    env_done = bool(done_array_cpu[env_idx])
-                    env_info = info_list[env_idx]
-                    for agent_id, agent_data in collected_agent_data.items():
-                        reward_value = float(reward_array_cpu[env_idx, agent_id])
-                        action_tensor = agent_data["action"][env_idx].unsqueeze(0).detach()
-                        log_prob_tensor = agent_data["log_prob"][env_idx].unsqueeze(0).detach()
-                        value_tensor = agent_data["value"][env_idx].unsqueeze(0).detach()
-                        experience = Experience(
-                            agent_id=agent_id,
-                            observation=env_obs,
-                            action=action_tensor,
-                            log_prob=log_prob_tensor,
-                            value=value_tensor,
-                            reward=reward_value,
-                            done=env_done,
-                            info=env_info,
-                        )
-                        self.replay_buffer.add(experience)
-                        self.stats.push_experience(experience)
-                self.stats.step(batch_envs)
-
-                episode_reward += float(np.sum(reward_array_cpu))
-                episode_agent_reward += reward_array_cpu.sum(axis=0, dtype=np.float64)
-                episode_steps = step + 1
-
-                steps_this_iter = batch_envs * max(len(self.agents), 1)
-                episode_agent_steps += steps_this_iter
-                total_agent_steps += steps_this_iter
-
-                if (step + 1) % 100 == 0 or step == self.env.config.max_steps - 1:
-                    active_time = max(time.perf_counter() - training_start - paused_time, 1e-8)
-                    delta_steps = total_agent_steps - last_logged_steps
-                    delta_time = max(active_time - last_active_time, 1e-8)
-                    steps_per_sec = delta_steps / delta_time
-                    last_active_time = active_time
-                    last_logged_steps = total_agent_steps
-                    if competitive_zero_sum:
-                        reward_per_env = float(episode_agent_reward[0]) / max(batch_envs, 1)
-                    else:
-                        reward_per_env = episode_reward / max(batch_envs, 1)
-                    training_logger.log_step(
-                        step + 1,
-                        self.env.config.max_steps,
-                        {
-                            "rewards": reward_per_env,
-                            "steps_per_sec": round(steps_per_sec, 2),
-                        },
-                    )
-
-                if bool(np.all(done_array_cpu)):
-                    break
-
-            if episode_reward_tensor is not None:
-                episode_reward = float(episode_reward_tensor.item())
-            if episode_agent_reward_tensor is not None:
-                episode_agent_reward = episode_agent_reward_tensor.detach().float().cpu().numpy()
+            if use_torch_fastpath:
+                episode_summary = self._run_fastpath_episode(
+                    episode=episode,
+                    obs=obs,
+                    record_env_idx=record_env_idx,
+                    competitive_zero_sum=competitive_zero_sum,
+                    progress=progress,
+                )
+            else:
+                episode_summary = self._run_legacy_episode(
+                    episode=episode,
+                    obs=obs,
+                    record_env_idx=record_env_idx,
+                    competitive_zero_sum=competitive_zero_sum,
+                    progress=progress,
+                )
 
             # Clear the step progress line before training logs
             print()
@@ -1183,110 +1284,30 @@ class PPOTrainer(Trainer):
                     self._update_agent_from_tensor_buffer(agent)
             else:
                 for agent in self.agents:
-                    agent.policy.train()
-
-                    for epoch in range(self.training_epochs):
-                        # Sample a batch of experiences (trajectory)
-                        trajectory = self.replay_buffer.sample_for_agent(
-                            agent.agent_id, self.batch_size
-                        )
-                        if not trajectory:
-                            break
-
-                        # Extract trajectory data as lists
-                        observations = [exp.observation for exp in trajectory]
-                        rewards = [
-                            sum(exp.reward.values()) if isinstance(exp.reward, dict) else exp.reward
-                            for exp in trajectory
-                        ]
-                        values = [exp.value.squeeze().item() for exp in trajectory]
-                        dones = [
-                            exp.done if isinstance(exp.done, bool) else bool(exp.done)
-                            for exp in trajectory
-                        ]
-
-                        # Get next value for bootstrap (from last observation)
-                        with torch.no_grad():
-                            _, next_value = agent.policy(observations[-1])
-                            next_value = next_value.squeeze().item()
-
-                        # Compute advantages for the trajectory
-                        advantages = self.compute_gae(rewards, values, next_value, dones).to(
-                            self.device
-                        )
-
-                        # Compute returns (advantages + values)
-                        returns = advantages + torch.tensor(
-                            values, dtype=torch.float32, device=self.device
-                        )
-
-                        # PPO update for each step in trajectory
-                        for i, exp in enumerate(trajectory):
-                            with self._autocast_context():
-                                logits, value = agent.policy(exp.observation)
-                            logits_f32 = logits.to(dtype=torch.float32)
-                            if not bool(torch.isfinite(logits_f32).all().item()):
-                                raise RuntimeError("Non-finite logits detected during PPO update")
-                            dist = torch.distributions.Categorical(logits=logits_f32)
-                            log_prob = dist.log_prob(exp.action)
-
-                            ratio = torch.exp(
-                                log_prob.to(dtype=torch.float32)
-                                - exp.log_prob.to(dtype=torch.float32)
-                            )
-
-                            adv = advantages[i]
-                            surr1 = ratio * adv
-                            surr2 = (
-                                torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
-                                * adv
-                            )
-                            policy_loss = -torch.min(surr1, surr2).mean()
-
-                            value_loss = (
-                                0.5
-                                * (returns[i] - value.squeeze().to(dtype=torch.float32))
-                                .pow(2)
-                                .mean()
-                            )
-
-                            loss = policy_loss + 0.5 * value_loss
-
-                            optimizer = self._get_optimizer(agent.agent_id)
-                            self._optimizer_step(optimizer, loss, agent.policy)
-
-                        # Beautiful epoch logging
-                        training_logger.log_epoch(
-                            epoch, self.training_epochs, policy_loss.item(), value_loss.item()
-                        )
-
-                        # Track and log losses (per agent)
-                        self.stats.push_agent_losses(
-                            agent.agent_id, policy_loss.item(), value_loss.item()
-                        )
-                        self.stats.log_wandb(step=self.stats.steps)
+                    self._update_agent_from_replay_buffer(agent)
 
             env_count = max(self.env_batch_size, 1)
             if competitive_zero_sum:
-                episode_reward_per_env = float(episode_agent_reward[0]) / env_count
+                episode_reward_per_env = float(episode_summary.agent_rewards[0]) / env_count
             else:
-                episode_reward_per_env = episode_reward / env_count
-            avg_reward = episode_reward_per_env / max(episode_steps, 1)
+                episode_reward_per_env = episode_summary.total_reward / env_count
+            avg_reward = episode_reward_per_env / max(episode_summary.steps, 1)
             training_logger.end_episode(
                 episode + 1,
                 total_reward=episode_reward_per_env,
                 avg_reward=avg_reward,
-                steps=episode_steps,
+                steps=episode_summary.steps,
             )
 
             if competitive_zero_sum:
                 self.stats.push_reward(
-                    float(episode_agent_reward[0]), env_count=self.env_batch_size
+                    float(episode_summary.agent_rewards[0]),
+                    env_count=self.env_batch_size,
                 )
             else:
-                self.stats.push_reward(episode_reward, env_count=self.env_batch_size)
+                self.stats.push_reward(episode_summary.total_reward, env_count=self.env_batch_size)
             self.stats.push_episode_metrics(
-                steps=episode_steps,
+                steps=episode_summary.steps,
                 harvested_tiles=self._episode_harvested_tiles(),
             )
             self.stats.log_wandb(step=self.stats.steps)
@@ -1309,7 +1330,7 @@ class PPOTrainer(Trainer):
                 training_logger.info(f"Saved episode metrics to {output_path}")
 
             self.save_checkpoint(f"checkpoints/ppo_checkpoint_{episode}.pth")
-            paused_time += time.perf_counter() - pause_start
+            progress.paused_time += time.perf_counter() - pause_start
 
         training_logger.finish(
             {
