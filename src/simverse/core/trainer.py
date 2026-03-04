@@ -1,17 +1,24 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from simverse.training.checkpoints import Checkpointer
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from simverse.training.checkpoints import Checkpointer
 
 
 class Trainer(ABC):
-    @abstractmethod
     def __init__(self, *args, **kwargs) -> None:
-        pass
+        self._checkpointer: Checkpointer | None = None
 
     @abstractmethod
     def train(self, *args, **kwargs) -> None:
         pass
 
     def save_checkpoint(self, checkpoint_path: str) -> None:
-        checkpointer = Checkpointer(self.env)
+        from simverse.training.checkpoints import Checkpointer
+
+        if self._checkpointer is None or self._checkpointer.env is not self.env:
+            self._checkpointer = Checkpointer(self.env)
+        checkpointer = self._checkpointer
         checkpointer.save(checkpoint_path)
