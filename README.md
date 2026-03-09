@@ -28,7 +28,7 @@ print(stats)
 The same helper is available via the package CLI:
 
 ```bash
-simverse rollout --env-id CartPole-v1 --episodes 5 --max-steps 200
+sim rollout --env-id CartPole-v1 --episodes 5 --max-steps 200
 ```
 
 ## Development Setup
@@ -82,3 +82,11 @@ train_snake(num_envs=512, episodes=200, use_wandb=False)
 ```
 
 `farmtila`, `maze_race`, and `battle_grid` follow the same pattern.
+
+There is also a simple CLI entrypoint for built-in environments:
+
+```bash
+sim train battle-grid
+```
+
+Available names today: `battle-grid`, `farmtila`, `gym-env`, `maze-race`, and `snake`.

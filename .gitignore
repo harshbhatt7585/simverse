@@ -5,3 +5,4 @@ checkpoints/
 recordings/
 .ruff_cache
 .venv-agent
+src/simverse.egg-info/
