@@ -26,6 +26,7 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
   const [status, setStatus] = useState('Loading replays...')
   const [error, setError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
+  const [followLatest, setFollowLatest] = useState(true)
 
   const selectedReplayName = useMemo(() => {
     if (selectedReplay?.name) {
@@ -43,9 +44,21 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
     frames.length > 0 ? frames[Math.max(0, Math.min(frameIndex, frames.length - 1))] : null
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRefreshToken((value) => value + 1)
+    }, 2000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       setError('')
-      setStatus('Loading replays...')
+      setStatus(
+        followLatest ? 'Watching replay directory for new episodes...' : 'Loading replays...',
+      )
       try {
         const response = await fetch(resolveUrl(baseUrl, '/replays/'), { cache: 'no-store' })
         if (!response.ok) {
@@ -72,23 +85,31 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
           setSelectedReplayId('')
           setSelectedReplay(null)
           setFrameIndex(0)
-          setStatus('No replay JSON files found.')
+          setStatus('No replay JSON files found yet.')
           return
         }
 
+        const latestReplayId = nextEpisodes[nextEpisodes.length - 1]?.id ?? ''
         setSelectedReplayId((currentId) => {
+          if (followLatest) {
+            return latestReplayId
+          }
           if (nextEpisodes.some((episode) => episode.id === currentId)) {
             return currentId
           }
-          return nextEpisodes[0].id
+          return latestReplayId
         })
-        setStatus(`Loaded ${nextEpisodes.length} replay files.`)
+        setStatus(
+          followLatest
+            ? `Watching ${nextEpisodes.length} replay files. Latest: ${latestReplayId}`
+            : `Loaded ${nextEpisodes.length} replay files.`,
+        )
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
       }
     })()
-  }, [baseUrl, refreshToken])
+  }, [baseUrl, followLatest, refreshToken])
 
   useEffect(() => {
     if (!selectedReplayId) {
@@ -130,6 +151,7 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
     if (!nextEpisode) {
       return
     }
+    setFollowLatest(nextIndex === episodes.length - 1)
     setSelectedReplayId(nextEpisode.id)
     setFrameIndex(0)
     setPlaying(autoPlay)
@@ -216,11 +238,13 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
             setSelectedReplay(null)
             setFrameIndex(0)
             setPlaying(false)
+            setFollowLatest(true)
             setRefreshToken((value) => value + 1)
           }}
         >
           <option value="snake">Snake</option>
-          <option value="maze">Maze Runner</option>
+          <option value="maze">Maze Race</option>
+          <option value="battle-grid">Battle Grid</option>
         </select>
 
         <label className="inline-label" htmlFor="replay-episode">
@@ -230,6 +254,9 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
           id="replay-episode"
           value={selectedReplayId}
           onChange={(event) => {
+            const nextReplayId = event.target.value
+            const latestReplayId = episodes[episodes.length - 1]?.id ?? ''
+            setFollowLatest(nextReplayId === latestReplayId)
             setSelectedReplayId(event.target.value)
             setFrameIndex(0)
             setPlaying(false)
@@ -308,10 +335,11 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
           type="button"
           className="full"
           onClick={() => {
+            setFollowLatest(true)
             setRefreshToken((value) => value + 1)
           }}
         >
-          Reload
+          {followLatest ? 'Following latest' : 'Follow latest'}
         </button>
 
         <pre className="status">{status}</pre>
