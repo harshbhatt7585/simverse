@@ -125,12 +125,6 @@ class PPOTrainer(Trainer):
             self.enable_torch_fastpath = self.device.type != "mps"
         else:
             self.enable_torch_fastpath = bool(configured_fastpath)
-        self.rollout_action_mode = str(self.config.get("rollout_action_mode", "random")).lower()
-        if self.rollout_action_mode not in {"policy", "random"}:
-            raise ValueError(
-                "Unsupported rollout_action_mode. Expected 'policy' or 'random', "
-                f"received {self.rollout_action_mode!r}."
-            )
         self._tensor_buffers: Dict[int, Dict[str, torch.Tensor]] = {}
         self._tensor_buffer_sizes: Dict[int, int] = {}
         self._tensor_buffer_ptrs: Dict[int, int] = {}
@@ -188,25 +182,6 @@ class PPOTrainer(Trainer):
     def _select_rollout_actions(
         self, logits_f32: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.rollout_action_mode == "random":
-            if logits_f32.ndim != 2:
-                raise ValueError(
-                    "Random rollout action mode expects batched logits with shape [batch, actions]"
-                )
-            action = torch.randint(
-                0,
-                int(logits_f32.shape[-1]),
-                (int(logits_f32.shape[0]),),
-                dtype=torch.int64,
-                device=logits_f32.device,
-            )
-            log_prob = torch.zeros(
-                (int(logits_f32.shape[0]),),
-                dtype=torch.float32,
-                device=logits_f32.device,
-            )
-            return action, log_prob
-
         dist = torch.distributions.Categorical(logits=logits_f32)
         action = dist.sample()
         log_prob = dist.log_prob(action).to(dtype=torch.float32)
@@ -931,11 +906,6 @@ class PPOTrainer(Trainer):
             training_logger.warning(
                 "Weights & Biases API unavailable. If installed, check for local module shadowing."
                 f"{suffix}"
-            )
-        if self.rollout_action_mode == "random":
-            training_logger.warning(
-                "Rollout action mode is set to random. Throughput measurements are valid, "
-                "but policy learning metrics are not meaningful in this mode."
             )
 
     def _finish_logging(self):
