@@ -111,7 +111,6 @@ def build_ppo_training_config(
         "buffer_size": resolved_buffer_size,
         "device": device,
         "dtype": dtype,
-        "torch_fastpath": True,
     }
     if extras:
         config.update(dict(extras))
@@ -181,5 +180,13 @@ def run_ppo_training(
         loss_trainer=loss_trainer,
         agent_factory=agent_factory,
     )
-    simulator.train(title=title)
+    previous_clone_payload_tensors = getattr(env, "clone_payload_tensors", None)
+    fast_payload_toggled = hasattr(env, "set_fast_payload_mode")
+    if fast_payload_toggled:
+        env.set_fast_payload_mode(True)
+    try:
+        simulator.train(title=title)
+    finally:
+        if fast_payload_toggled:
+            env.clone_payload_tensors = bool(previous_clone_payload_tensors)
     return policy_models
