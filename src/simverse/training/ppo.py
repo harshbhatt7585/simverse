@@ -13,7 +13,7 @@ from simverse.core.trainer import Trainer
 from simverse.training.logging import training_logger
 from simverse.training.stats import TrainingStats
 from simverse.training.wandb import DEFAULT_WANDB_PROJECT
-from simverse.utils.replay_buffer import Experience, ReplayBuffer
+from simverse.utils.replay_buffer import ReplayBuffer
 
 try:
     import wandb
@@ -38,6 +38,9 @@ class EpisodeSummary:
     total_reward: float
     agent_rewards: np.ndarray
     steps: int
+    next_observation: Dict[str, Any] | None = None
+    all_done: bool = False
+    active_mask: torch.Tensor | None = None
 
 
 class PPOTrainer(Trainer):
@@ -127,6 +130,7 @@ class PPOTrainer(Trainer):
         self._tensor_buffer_ptrs: Dict[int, int] = {}
         self._tensor_buffer_capacity = 0
         self._tensor_obs_shape: tuple[int, ...] | None = None
+        self._tensor_final_values: Dict[int, torch.Tensor] = {}
 
     def _record_frame(self, frame_record: Dict[str, Any]) -> None:
         if self.episode_save_dir:
@@ -509,6 +513,49 @@ class PPOTrainer(Trainer):
             return done_array.to(device=self.device, dtype=torch.bool)
         return torch.as_tensor(done_array, device=self.device, dtype=torch.bool)
 
+    def _active_env_mask(self, observation: Dict[str, Any], batch_size: int) -> torch.Tensor:
+        done_field = observation.get("done")
+        if done_field is None:
+            return torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        done_tensor = self._done_to_tensor(done_field, batch_size)
+        return ~done_tensor
+
+    def _rollout_horizon_steps(self) -> int:
+        num_agents = max(len(getattr(self, "agents", [])), 1)
+        per_agent_capacity = max(self.replay_buffer.max_size // num_agents, 1)
+        return max(per_agent_capacity // max(self.env_batch_size, 1), 1)
+
+    def _capture_rollout_bootstrap_values(self, observation: Dict[str, Any]) -> None:
+        batch_size = self._batch_size_from_obs(observation)
+        active_mask = self._active_env_mask(observation, batch_size)
+        if not bool(active_mask.any().item()):
+            zero_values = torch.zeros(batch_size, dtype=torch.float32, device=self.device)
+            self._tensor_final_values = {
+                agent.agent_id: zero_values.clone() for agent in self.agents
+            }
+            return
+
+        obs_tensor = self._prepare_obs_tensor(observation)
+        local_obs_tensor = self._prepare_local_obs_tensor(observation, batch_size)
+        final_values: Dict[int, torch.Tensor] = {}
+
+        with torch.no_grad():
+            centralized_values: torch.Tensor | None = None
+            if self.use_ctde:
+                centralized_values = self._critic_value(obs_tensor).squeeze(-1).detach()
+
+            for agent in self.agents:
+                if self.use_ctde and centralized_values is not None:
+                    final_values[agent.agent_id] = centralized_values.to(dtype=torch.float32)
+                    continue
+
+                actor_obs = local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
+                with self._autocast_context():
+                    _logits, value = agent.policy(actor_obs)
+                final_values[agent.agent_id] = value.squeeze(-1).detach().to(dtype=torch.float32)
+
+        self._tensor_final_values = final_values
+
     def _ensure_tensor_buffers(
         self,
         obs_shape: tuple[int, ...],
@@ -545,6 +592,7 @@ class PPOTrainer(Trainer):
                 "value": torch.empty((capacity,), dtype=torch.float32, device=self.device),
                 "reward": torch.empty((capacity,), dtype=torch.float32, device=self.device),
                 "done": torch.empty((capacity,), dtype=torch.bool, device=self.device),
+                "valid": torch.empty((capacity,), dtype=torch.bool, device=self.device),
             }
             if self.use_ctde:
                 if global_obs_shape is None:
@@ -568,6 +616,7 @@ class PPOTrainer(Trainer):
         value: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
+        valid: torch.Tensor,
     ) -> None:
         buffer = self._tensor_buffers.get(agent_id)
         if buffer is None:
@@ -597,6 +646,7 @@ class PPOTrainer(Trainer):
         buffer["value"].index_copy_(0, indices, value[:batch_size].to(dtype=torch.float32))
         buffer["reward"].index_copy_(0, indices, reward[:batch_size].to(dtype=torch.float32))
         buffer["done"].index_copy_(0, indices, done[:batch_size])
+        buffer["valid"].index_copy_(0, indices, valid[:batch_size].to(dtype=torch.bool))
         if self.use_ctde:
             if global_obs is None:
                 raise ValueError("CTDE requires global_obs when adding tensor buffer data")
@@ -609,6 +659,7 @@ class PPOTrainer(Trainer):
         )
 
     def _reset_tensor_buffers(self) -> None:
+        self._tensor_final_values = {}
         for agent in self.agents:
             agent_id = agent.agent_id
             if agent_id in self._tensor_buffer_sizes:
@@ -656,31 +707,47 @@ class PPOTrainer(Trainer):
         )
         rewards_all = buffer["reward"].index_select(0, ordered_indices).to(dtype=torch.float32)
         dones_all = buffer["done"].index_select(0, ordered_indices)
+        valid_all = buffer["valid"].index_select(0, ordered_indices)
+        final_values = self._tensor_final_values.get(
+            agent.agent_id,
+            torch.zeros(env_count, dtype=torch.float32, device=self.device),
+        )
 
         advantages_all = self._compute_vectorized_gae(
             rewards=rewards_all,
             values=sampled_values_all,
             dones=dones_all,
+            valid=valid_all,
+            final_values=final_values,
             env_count=env_count,
         )
         returns_all = advantages_all + sampled_values_all
-        policy_advantages_all = advantages_all
-        if self.normalize_advantages and policy_advantages_all.numel() > 1:
-            policy_advantages_all = (policy_advantages_all - policy_advantages_all.mean()) / (
-                policy_advantages_all.std() + 1e-8
+        valid_positions = torch.nonzero(valid_all, as_tuple=False).squeeze(-1)
+        if valid_positions.numel() == 0:
+            return
+
+        policy_advantages_all = advantages_all.clone()
+        valid_advantages = policy_advantages_all.index_select(0, valid_positions)
+        if self.normalize_advantages and valid_advantages.numel() > 1:
+            normalized_advantages = (valid_advantages - valid_advantages.mean()) / (
+                valid_advantages.std() + 1e-8
             )
+            policy_advantages_all.index_copy_(0, valid_positions, normalized_advantages)
+
+        sample_count = int(valid_positions.numel())
 
         for epoch in range(self.training_epochs):
-            permutation = torch.randperm(usable_count, device=self.device)
+            permutation = torch.randperm(sample_count, device=self.device)
             epoch_policy_loss = 0.0
             epoch_value_loss = 0.0
             updates = 0
 
-            for start in range(0, usable_count, self.batch_size):
-                mb_positions = permutation[start : start + self.batch_size]
-                if mb_positions.numel() == 0:
+            for start in range(0, sample_count, self.batch_size):
+                mb_valid_positions = permutation[start : start + self.batch_size]
+                if mb_valid_positions.numel() == 0:
                     continue
 
+                mb_positions = valid_positions.index_select(0, mb_valid_positions)
                 mb_buffer_indices = ordered_indices.index_select(0, mb_positions)
                 observations = buffer["obs"].index_select(0, mb_buffer_indices)
                 actions = actions_all.index_select(0, mb_positions)
@@ -807,6 +874,8 @@ class PPOTrainer(Trainer):
         rewards: torch.Tensor,
         values: torch.Tensor,
         dones: torch.Tensor,
+        valid: torch.Tensor,
+        final_values: torch.Tensor,
         env_count: int,
     ) -> torch.Tensor:
         total = int(rewards.shape[0])
@@ -815,35 +884,45 @@ class PPOTrainer(Trainer):
 
         usable = (total // env_count) * env_count
         if usable <= 0:
-            return self.compute_gae(
-                rewards.detach().cpu().tolist(),
-                values.detach().cpu().tolist(),
-                0.0,
-                dones.detach().cpu().tolist(),
-            ).to(device=self.device, dtype=torch.float32)
+            return torch.empty(0, dtype=torch.float32, device=self.device)
 
         if usable != total:
             start = total - usable
             rewards = rewards[start:]
             values = values[start:]
             dones = dones[start:]
+            valid = valid[start:]
 
         rewards_seq = rewards.to(dtype=torch.float32).reshape(-1, env_count)
         values_seq = values.to(dtype=torch.float32).reshape(-1, env_count)
         dones_seq = dones.reshape(-1, env_count).to(dtype=torch.bool)
+        valid_seq = valid.reshape(-1, env_count).to(dtype=torch.bool)
+        bootstrap_values = final_values.to(device=self.device, dtype=torch.float32)
+        if bootstrap_values.ndim == 0:
+            bootstrap_values = bootstrap_values.repeat(env_count)
+        if int(bootstrap_values.shape[0]) != env_count:
+            raise ValueError(
+                f"Expected {env_count} bootstrap values, received {int(bootstrap_values.shape[0])}"
+            )
 
         next_values = torch.zeros_like(values_seq)
         if values_seq.shape[0] > 1:
-            next_values[:-1] = values_seq[1:]
+            next_values[:-1] = torch.where(
+                valid_seq[1:],
+                values_seq[1:],
+                torch.zeros_like(values_seq[:-1]),
+            )
+        next_values[-1] = bootstrap_values
 
         advantages = torch.zeros_like(values_seq, dtype=torch.float32)
         gae = torch.zeros(env_count, dtype=torch.float32, device=self.device)
         for step in range(values_seq.shape[0] - 1, -1, -1):
-            non_terminal = (~dones_seq[step]).to(dtype=torch.float32)
+            valid_step = valid_seq[step].to(dtype=torch.float32)
+            non_terminal = valid_step * (~dones_seq[step]).to(dtype=torch.float32)
             delta = (
                 rewards_seq[step] + self.gamma * next_values[step] * non_terminal - values_seq[step]
             )
-            gae = delta + self.gamma * self.gae_lambda * non_terminal * gae
+            gae = valid_step * delta + self.gamma * self.gae_lambda * non_terminal * gae
             advantages[step] = gae
         return advantages.reshape(-1)
 
@@ -891,6 +970,9 @@ class PPOTrainer(Trainer):
         record_env_idx: int | None,
         competitive_zero_sum: bool,
         progress: RolloutProgress,
+        start_step: int = 0,
+        max_segment_steps: int | None = None,
+        active_mask: torch.Tensor | None = None,
     ) -> EpisodeSummary:
         episode_reward = torch.zeros((), dtype=torch.float32, device=self.device)
         episode_agent_reward = torch.zeros(
@@ -899,10 +981,19 @@ class PPOTrainer(Trainer):
             device=self.device,
         )
         episode_steps = 0
+        all_done = False
+        remaining_steps = max(self.env.config.max_steps - start_step, 0)
+        rollout_steps = (
+            remaining_steps
+            if max_segment_steps is None
+            else min(remaining_steps, max_segment_steps)
+        )
 
-        for step in range(self.env.config.max_steps):
+        for local_step in range(rollout_steps):
+            step = start_step + local_step
             obs_tensor = self._prepare_obs_tensor(obs)
             batch_envs = obs_tensor.shape[0]
+            active_mask = self._active_env_mask(obs, batch_envs)
             local_obs_tensor = self._prepare_local_obs_tensor(obs, batch_envs)
 
             if self.use_ctde:
@@ -955,25 +1046,29 @@ class PPOTrainer(Trainer):
 
             if record_env_idx is not None:
                 env_to_record = min(record_env_idx, batch_envs - 1)
-                frame_actions = {
-                    agent_id: int(agent_data["action"][env_to_record].item())
-                    for agent_id, agent_data in collected_agent_data.items()
-                }
-                self._record_episode_step(
-                    observation=obs,
-                    actions=frame_actions,
-                    reward_row=reward_tensor[env_to_record].detach().float().cpu().numpy(),
-                    info=self._extract_info_for_env(info, env_to_record),
-                    episode=episode + 1,
-                    step=step + 1,
-                    done=bool(done_tensor[env_to_record].item()),
-                    env_idx=env_to_record,
-                )
+                if bool(active_mask[env_to_record].item()):
+                    frame_actions = {
+                        agent_id: int(agent_data["action"][env_to_record].item())
+                        for agent_id, agent_data in collected_agent_data.items()
+                    }
+                    self._record_episode_step(
+                        observation=obs,
+                        actions=frame_actions,
+                        reward_row=reward_tensor[env_to_record].detach().float().cpu().numpy(),
+                        info=self._extract_info_for_env(info, env_to_record),
+                        episode=episode + 1,
+                        step=step + 1,
+                        done=bool(done_tensor[env_to_record].item()),
+                        env_idx=env_to_record,
+                    )
 
             obs_batch = obs_tensor.detach()
             done_batch = done_tensor.detach()
+            valid_batch = active_mask.detach()
             for agent_id, agent_data in collected_agent_data.items():
-                actor_obs_batch = local_obs_tensor[:, agent_id].detach() if self.use_ctde else obs_batch
+                actor_obs_batch = (
+                    local_obs_tensor[:, agent_id].detach() if self.use_ctde else obs_batch
+                )
                 self._tensor_buffer_add(
                     agent_id,
                     obs=actor_obs_batch,
@@ -983,13 +1078,16 @@ class PPOTrainer(Trainer):
                     value=agent_data["value"],
                     reward=reward_tensor[:, agent_id].detach(),
                     done=done_batch,
+                    valid=valid_batch,
                 )
-            self.stats.step(batch_envs)
+            active_envs = int(active_mask.sum().item())
+            if active_envs > 0:
+                self.stats.step(active_envs)
 
             episode_reward += reward_tensor.sum()
             episode_agent_reward += reward_tensor.sum(dim=0)
-            episode_steps = step + 1
-            progress.total_agent_steps += batch_envs * max(len(self.agents), 1)
+            episode_steps = local_step + 1
+            progress.total_agent_steps += active_envs * max(len(self.agents), 1)
 
             self._log_rollout_progress(
                 step=step,
@@ -1000,13 +1098,18 @@ class PPOTrainer(Trainer):
                 progress=progress,
             )
 
-            if bool(done_tensor.all().item()):
+            all_done = bool(done_tensor.all().item())
+            if all_done:
                 break
 
+        self._capture_rollout_bootstrap_values(obs)
         return EpisodeSummary(
             total_reward=float(episode_reward.item()),
             agent_rewards=episode_agent_reward.detach().float().cpu().numpy(),
             steps=episode_steps,
+            next_observation=obs,
+            all_done=all_done,
+            active_mask=~done_tensor if episode_steps > 0 else active_mask,
         )
 
     def _run_legacy_episode(
@@ -1017,6 +1120,9 @@ class PPOTrainer(Trainer):
         record_env_idx: int | None,
         competitive_zero_sum: bool,
         progress: RolloutProgress,
+        start_step: int = 0,
+        max_segment_steps: int | None = None,
+        active_mask: torch.Tensor | None = None,
     ) -> EpisodeSummary:
         if self.use_ctde:
             raise RuntimeError(
@@ -1026,10 +1132,25 @@ class PPOTrainer(Trainer):
         episode_reward = 0.0
         episode_agent_reward = np.zeros((self.env.config.num_agents,), dtype=np.float64)
         episode_steps = 0
+        all_done = False
+        remaining_steps = max(self.env.config.max_steps - start_step, 0)
+        rollout_steps = (
+            remaining_steps
+            if max_segment_steps is None
+            else min(remaining_steps, max_segment_steps)
+        )
+        current_active_mask = active_mask
 
-        for step in range(self.env.config.max_steps):
+        for local_step in range(rollout_steps):
+            step = start_step + local_step
             obs_tensor = self._prepare_obs_tensor(obs)
             batch_envs = obs_tensor.shape[0]
+            active_mask = (
+                self._active_env_mask(obs, batch_envs)
+                if current_active_mask is None
+                else current_active_mask
+            )
+            self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
 
             actions_per_env: List[Dict[int, int]] | None = None
             action_tensors: List[torch.Tensor] = []
@@ -1090,51 +1211,53 @@ class PPOTrainer(Trainer):
             else:
                 done_array_cpu = done_array
             info_list = self._ensure_info_list(info, batch_envs)
+            reward_tensor = self._reward_to_tensor(reward, batch_envs)
+            done_tensor = self._done_to_tensor(done, batch_envs)
 
             if record_env_idx is not None:
                 env_to_record = min(record_env_idx, batch_envs - 1)
-                if isinstance(self.env, SimEnv):
-                    frame_actions = {
-                        agent.agent_id: int(collected_agent_data[agent.agent_id]["action"][env_to_record].item())
-                        for agent in self.agents
-                    }
-                else:
-                    frame_actions = actions_per_env[env_to_record] if actions_per_env else {}
-                self._record_episode_step(
-                    observation=obs,
-                    actions=frame_actions,
-                    reward_row=reward_array_cpu[env_to_record],
-                    info=info_list[env_to_record],
-                    episode=episode + 1,
-                    step=step + 1,
-                    done=bool(done_array_cpu[env_to_record]),
-                    env_idx=env_to_record,
-                )
-
-            for env_idx in range(batch_envs):
-                env_obs = obs_tensor[env_idx].unsqueeze(0).detach()
-                env_done = bool(done_array_cpu[env_idx])
-                env_info = info_list[env_idx]
-                for agent_id, agent_data in collected_agent_data.items():
-                    reward_value = float(reward_array_cpu[env_idx, agent_id])
-                    experience = Experience(
-                        agent_id=agent_id,
-                        observation=env_obs,
-                        action=agent_data["action"][env_idx].unsqueeze(0).detach(),
-                        log_prob=agent_data["log_prob"][env_idx].unsqueeze(0).detach(),
-                        value=agent_data["value"][env_idx].unsqueeze(0).detach(),
-                        reward=reward_value,
-                        done=env_done,
-                        info=env_info,
+                if bool(active_mask[env_to_record].item()):
+                    if isinstance(self.env, SimEnv):
+                        frame_actions = {
+                            agent.agent_id: int(
+                                collected_agent_data[agent.agent_id]["action"][env_to_record].item()
+                            )
+                            for agent in self.agents
+                        }
+                    else:
+                        frame_actions = actions_per_env[env_to_record] if actions_per_env else {}
+                    self._record_episode_step(
+                        observation=obs,
+                        actions=frame_actions,
+                        reward_row=reward_array_cpu[env_to_record],
+                        info=info_list[env_to_record],
+                        episode=episode + 1,
+                        step=step + 1,
+                        done=bool(done_array_cpu[env_to_record]),
+                        env_idx=env_to_record,
                     )
-                    self.replay_buffer.add(experience)
-                    self.stats.push_experience(experience)
-            self.stats.step(batch_envs)
+
+            obs_batch = obs_tensor.detach()
+            valid_batch = active_mask.detach()
+            for agent_id, agent_data in collected_agent_data.items():
+                self._tensor_buffer_add(
+                    agent_id,
+                    obs=obs_batch,
+                    action=agent_data["action"].detach(),
+                    log_prob=agent_data["log_prob"].detach(),
+                    value=agent_data["value"].detach(),
+                    reward=reward_tensor[:, agent_id].detach(),
+                    done=done_tensor.detach(),
+                    valid=valid_batch,
+                )
+            active_envs = int(active_mask.sum().item())
+            if active_envs > 0:
+                self.stats.step(active_envs)
 
             episode_reward += float(np.sum(reward_array_cpu))
             episode_agent_reward += reward_array_cpu.sum(axis=0, dtype=np.float64)
-            episode_steps = step + 1
-            progress.total_agent_steps += batch_envs * max(len(self.agents), 1)
+            episode_steps = local_step + 1
+            progress.total_agent_steps += active_envs * max(len(self.agents), 1)
 
             self._log_rollout_progress(
                 step=step,
@@ -1145,13 +1268,19 @@ class PPOTrainer(Trainer):
                 progress=progress,
             )
 
-            if bool(np.all(done_array_cpu)):
+            current_active_mask = ~done_tensor
+            all_done = bool(np.all(done_array_cpu))
+            if all_done:
                 break
 
+        self._capture_rollout_bootstrap_values(obs)
         return EpisodeSummary(
             total_reward=episode_reward,
             agent_rewards=episode_agent_reward,
             steps=episode_steps,
+            next_observation=obs,
+            all_done=all_done,
+            active_mask=current_active_mask,
         )
 
     def _update_agent_from_replay_buffer(self, agent: SimAgent) -> None:
@@ -1168,7 +1297,9 @@ class PPOTrainer(Trainer):
                 for exp in trajectory
             ]
             values = [exp.value.squeeze().item() for exp in trajectory]
-            dones = [exp.done if isinstance(exp.done, bool) else bool(exp.done) for exp in trajectory]
+            dones = [
+                exp.done if isinstance(exp.done, bool) else bool(exp.done) for exp in trajectory
+            ]
 
             with torch.no_grad():
                 _, next_value = agent.policy(observations[-1])
@@ -1198,10 +1329,7 @@ class PPOTrainer(Trainer):
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 value_loss = (
-                    0.5
-                    * (returns[i] - value.squeeze().to(dtype=torch.float32))
-                    .pow(2)
-                    .mean()
+                    0.5 * (returns[i] - value.squeeze().to(dtype=torch.float32)).pow(2).mean()
                 )
 
                 loss = policy_loss + 0.5 * value_loss
@@ -1258,33 +1386,61 @@ class PPOTrainer(Trainer):
             )
             use_torch_fastpath = isinstance(self.env, SimEnv) and self.enable_torch_fastpath
             competitive_zero_sum = hasattr(self.env.config, "score_delta_reward")
-            if use_torch_fastpath:
-                episode_summary = self._run_fastpath_episode(
-                    episode=episode,
-                    obs=obs,
-                    record_env_idx=record_env_idx,
-                    competitive_zero_sum=competitive_zero_sum,
-                    progress=progress,
-                )
-            else:
-                episode_summary = self._run_legacy_episode(
-                    episode=episode,
-                    obs=obs,
-                    record_env_idx=record_env_idx,
-                    competitive_zero_sum=competitive_zero_sum,
-                    progress=progress,
-                )
+            rollout_horizon = self._rollout_horizon_steps()
+            episode_total_reward = 0.0
+            episode_agent_rewards = np.zeros((self.env.config.num_agents,), dtype=np.float64)
+            episode_steps = 0
+            all_done = False
+            current_active_mask: torch.Tensor | None = None
 
-            # Clear the step progress line before training logs
-            print()
+            while episode_steps < self.env.config.max_steps and not all_done:
+                self._reset_tensor_buffers()
+                if use_torch_fastpath:
+                    segment_summary = self._run_fastpath_episode(
+                        episode=episode,
+                        obs=obs,
+                        record_env_idx=record_env_idx,
+                        competitive_zero_sum=competitive_zero_sum,
+                        progress=progress,
+                        start_step=episode_steps,
+                        max_segment_steps=rollout_horizon,
+                    )
+                else:
+                    segment_summary = self._run_legacy_episode(
+                        episode=episode,
+                        obs=obs,
+                        record_env_idx=record_env_idx,
+                        competitive_zero_sum=competitive_zero_sum,
+                        progress=progress,
+                        start_step=episode_steps,
+                        max_segment_steps=rollout_horizon,
+                        active_mask=current_active_mask,
+                    )
 
-            # TRAINING PHASE (MODEL UPDATE)
-            if use_torch_fastpath:
+                if segment_summary.steps <= 0:
+                    break
+
+                # Clear the step progress line before training logs
+                print()
+
                 for agent in self.agents:
                     self._update_agent_from_tensor_buffer(agent)
-            else:
-                for agent in self.agents:
-                    self._update_agent_from_replay_buffer(agent)
+
+                episode_total_reward += segment_summary.total_reward
+                episode_agent_rewards += segment_summary.agent_rewards
+                episode_steps += segment_summary.steps
+                obs = segment_summary.next_observation or obs
+                all_done = segment_summary.all_done
+                current_active_mask = segment_summary.active_mask
+
+            episode_summary = EpisodeSummary(
+                total_reward=episode_total_reward,
+                agent_rewards=episode_agent_rewards,
+                steps=episode_steps,
+                next_observation=obs,
+                all_done=all_done,
+                active_mask=current_active_mask,
+            )
 
             env_count = max(self.env_batch_size, 1)
             if competitive_zero_sum:

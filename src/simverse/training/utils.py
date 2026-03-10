@@ -90,6 +90,13 @@ def build_ppo_training_config(
     dtype: torch.dtype,
     extras: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    rollout_multiple = int(num_envs) * int(num_agents)
+    min_rollout_steps = max(1, min(int(max_steps), 64))
+    min_buffer_size = rollout_multiple * min_rollout_steps
+    resolved_buffer_size = max(int(buffer_size), min_buffer_size)
+    resolved_buffer_size = (
+        (resolved_buffer_size + rollout_multiple - 1) // rollout_multiple
+    ) * rollout_multiple
     config = {
         "num_agents": int(num_agents),
         "num_envs": int(num_envs),
@@ -101,7 +108,7 @@ def build_ppo_training_config(
         "gae_lambda": 0.95,
         "lr": float(lr),
         "batch_size": int(batch_size),
-        "buffer_size": int(buffer_size),
+        "buffer_size": resolved_buffer_size,
         "device": device,
         "dtype": dtype,
         "torch_fastpath": True,

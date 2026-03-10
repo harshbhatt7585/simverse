@@ -54,15 +54,20 @@ def _derive_buffer_size(
     *,
     num_envs: int,
     num_agents: int,
+    max_steps: int,
     batch_size: int,
     requested_buffer_size: Optional[int],
 ) -> int:
     min_buffer_size = batch_size * num_agents
-    default_buffer_size = min_buffer_size * 4
+    rollout_buffer_size = num_envs * num_agents * max(1, min(int(max_steps), 64))
+    default_buffer_size = max(min_buffer_size * 4, rollout_buffer_size)
     buffer_size = (
         int(requested_buffer_size) if requested_buffer_size is not None else default_buffer_size
     )
-    return _round_up_to_multiple(max(min_buffer_size, buffer_size), num_envs * num_agents)
+    return _round_up_to_multiple(
+        max(min_buffer_size, rollout_buffer_size, buffer_size),
+        num_envs * num_agents,
+    )
 
 
 def build_training_config(
@@ -99,6 +104,7 @@ def build_training_config(
     resolved_buffer_size = _derive_buffer_size(
         num_envs=resolved_num_envs,
         num_agents=resolved_num_agents,
+        max_steps=max_steps,
         batch_size=resolved_batch_size,
         requested_buffer_size=buffer_size,
     )
