@@ -83,6 +83,10 @@ train_snake(num_envs=512, episodes=200, use_wandb=False)
 
 `farmtila`, `maze_race`, and `battle_grid` follow the same pattern.
 
+Device guidance from current Apple silicon benchmarks:
+- use `cpu` when `num_envs < 128`
+- use `mps` when `num_envs >= 128`
+
 There is also a simple CLI entrypoint for built-in environments:
 
 ```bash
