@@ -125,11 +125,18 @@ class PPOTrainer(Trainer):
             self.enable_torch_fastpath = self.device.type != "mps"
         else:
             self.enable_torch_fastpath = bool(configured_fastpath)
+        self.rollout_action_mode = str(self.config.get("rollout_action_mode", "random")).lower()
+        if self.rollout_action_mode not in {"policy", "random"}:
+            raise ValueError(
+                "Unsupported rollout_action_mode. Expected 'policy' or 'random', "
+                f"received {self.rollout_action_mode!r}."
+            )
         self._tensor_buffers: Dict[int, Dict[str, torch.Tensor]] = {}
         self._tensor_buffer_sizes: Dict[int, int] = {}
         self._tensor_buffer_ptrs: Dict[int, int] = {}
         self._tensor_buffer_capacity = 0
         self._tensor_obs_shape: tuple[int, ...] | None = None
+        self._tensor_feature_shape: tuple[int, ...] | None = None
         self._tensor_final_values: Dict[int, torch.Tensor] = {}
 
     def _record_frame(self, frame_record: Dict[str, Any]) -> None:
@@ -177,6 +184,33 @@ class PPOTrainer(Trainer):
         if self.max_grad_norm > 0.0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), self.max_grad_norm)
         optimizer.step()
+
+    def _select_rollout_actions(
+        self, logits_f32: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.rollout_action_mode == "random":
+            if logits_f32.ndim != 2:
+                raise ValueError(
+                    "Random rollout action mode expects batched logits with shape [batch, actions]"
+                )
+            action = torch.randint(
+                0,
+                int(logits_f32.shape[-1]),
+                (int(logits_f32.shape[0]),),
+                dtype=torch.int64,
+                device=logits_f32.device,
+            )
+            log_prob = torch.zeros(
+                (int(logits_f32.shape[0]),),
+                dtype=torch.float32,
+                device=logits_f32.device,
+            )
+            return action, log_prob
+
+        dist = torch.distributions.Categorical(logits=logits_f32)
+        action = dist.sample()
+        log_prob = dist.log_prob(action).to(dtype=torch.float32)
+        return action, log_prob
 
     def _env_metadata(self) -> Dict[str, Any]:
         if self._env_metadata_cache is not None:
@@ -226,10 +260,13 @@ class PPOTrainer(Trainer):
     ) -> Dict[str, Any]:
         obs_array = observation.get("obs")
         serialized_obs = obs_array.tolist() if hasattr(obs_array, "tolist") else obs_array
+        features = observation.get("features")
+        serialized_features = features.tolist() if hasattr(features, "tolist") else features
         return {
             "episode": int(episode),
             "step": step,
             "observation": serialized_obs,
+            "features": serialized_features,
             "agents": observation.get("agents", []),
             "actions": [
                 {"agent_id": agent_id, "action": action}
@@ -284,6 +321,28 @@ class PPOTrainer(Trainer):
             return obs_array.to(self.device, dtype=self.dtype)
         return torch.from_numpy(obs_array).to(self.dtype).to(self.device)
 
+    def _prepare_feature_tensor(
+        self,
+        observation: Dict[str, Any],
+        batch_size: int,
+    ) -> torch.Tensor | None:
+        features = observation.get("features")
+        if features is None:
+            return None
+        if isinstance(features, torch.Tensor):
+            feature_tensor = features.to(self.device, dtype=self.dtype)
+        elif isinstance(features, np.ndarray):
+            feature_tensor = torch.from_numpy(features).to(self.device, dtype=self.dtype)
+        else:
+            feature_tensor = torch.as_tensor(features, device=self.device, dtype=self.dtype)
+        if feature_tensor.dim() == 1:
+            feature_tensor = feature_tensor.unsqueeze(0)
+        if int(feature_tensor.shape[0]) != batch_size:
+            raise ValueError(
+                f"Expected feature batch size {batch_size}, received {int(feature_tensor.shape[0])}"
+            )
+        return feature_tensor
+
     def _prepare_local_obs_tensor(
         self,
         observation: Dict[str, Any],
@@ -310,6 +369,16 @@ class PPOTrainer(Trainer):
                 f"Expected local_obs batch size {batch_size}, received {int(local.shape[0])}"
             )
         return local
+
+    def _policy_forward(
+        self,
+        policy: torch.nn.Module,
+        observation: torch.Tensor,
+        features: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if features is None:
+            return policy(observation)
+        return policy(observation, features)
 
     def _critic_value(self, global_observation: torch.Tensor) -> torch.Tensor:
         if self.centralized_critic is None:
@@ -460,8 +529,19 @@ class PPOTrainer(Trainer):
         else:
             env_local_obs = None
 
+        feature_field = observation.get("features")
+        if isinstance(feature_field, torch.Tensor):
+            env_features = feature_field[env_idx]
+        elif isinstance(feature_field, np.ndarray):
+            env_features = feature_field[env_idx]
+        elif isinstance(feature_field, (list, tuple)) and len(feature_field) > env_idx:
+            env_features = feature_field[env_idx]
+        else:
+            env_features = None
+
         return {
             "obs": env_obs,
+            "features": env_features,
             "local_obs": env_local_obs,
             "agents": env_agents,
             "done": env_done,
@@ -536,6 +616,7 @@ class PPOTrainer(Trainer):
             return
 
         obs_tensor = self._prepare_obs_tensor(observation)
+        feature_tensor = self._prepare_feature_tensor(observation, batch_size)
         local_obs_tensor = self._prepare_local_obs_tensor(observation, batch_size)
         final_values: Dict[int, torch.Tensor] = {}
 
@@ -551,7 +632,11 @@ class PPOTrainer(Trainer):
 
                 actor_obs = local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
                 with self._autocast_context():
-                    _logits, value = agent.policy(actor_obs)
+                    _logits, value = self._policy_forward(
+                        agent.policy,
+                        actor_obs,
+                        feature_tensor,
+                    )
                 final_values[agent.agent_id] = value.squeeze(-1).detach().to(dtype=torch.float32)
 
         self._tensor_final_values = final_values
@@ -560,6 +645,7 @@ class PPOTrainer(Trainer):
         self,
         obs_shape: tuple[int, ...],
         global_obs_shape: tuple[int, ...] | None = None,
+        feature_shape: tuple[int, ...] | None = None,
     ) -> None:
         if not self.agents:
             return
@@ -568,6 +654,7 @@ class PPOTrainer(Trainer):
         needs_reset = (
             self._tensor_buffer_capacity != capacity
             or self._tensor_obs_shape != obs_shape
+            or self._tensor_feature_shape != feature_shape
             or any(agent.agent_id not in self._tensor_buffers for agent in self.agents)
         )
         if not needs_reset:
@@ -578,6 +665,7 @@ class PPOTrainer(Trainer):
         self._tensor_buffer_ptrs = {}
         self._tensor_buffer_capacity = capacity
         self._tensor_obs_shape = obs_shape
+        self._tensor_feature_shape = feature_shape
 
         for agent in self.agents:
             agent_id = agent.agent_id
@@ -594,6 +682,12 @@ class PPOTrainer(Trainer):
                 "done": torch.empty((capacity,), dtype=torch.bool, device=self.device),
                 "valid": torch.empty((capacity,), dtype=torch.bool, device=self.device),
             }
+            if feature_shape is not None:
+                self._tensor_buffers[agent_id]["features"] = torch.empty(
+                    (capacity, *feature_shape),
+                    dtype=self.dtype,
+                    device=self.device,
+                )
             if self.use_ctde:
                 if global_obs_shape is None:
                     raise ValueError("CTDE requires global observation shape for tensor buffers")
@@ -610,6 +704,7 @@ class PPOTrainer(Trainer):
         agent_id: int,
         *,
         obs: torch.Tensor,
+        features: torch.Tensor | None = None,
         global_obs: torch.Tensor | None = None,
         action: torch.Tensor,
         log_prob: torch.Tensor,
@@ -629,6 +724,8 @@ class PPOTrainer(Trainer):
         if batch_size > capacity:
             start = batch_size - capacity
             obs = obs[start:]
+            if features is not None:
+                features = features[start:]
             action = action[start:]
             log_prob = log_prob[start:]
             value = value[start:]
@@ -641,6 +738,10 @@ class PPOTrainer(Trainer):
         ptr = self._tensor_buffer_ptrs[agent_id]
         indices = (torch.arange(batch_size, device=self.device) + ptr) % capacity
         buffer["obs"].index_copy_(0, indices, obs[:batch_size])
+        if features is not None:
+            if "features" not in buffer:
+                raise ValueError("Feature buffer missing for observation features")
+            buffer["features"].index_copy_(0, indices, features[:batch_size])
         buffer["action"].index_copy_(0, indices, action[:batch_size])
         buffer["log_prob"].index_copy_(0, indices, log_prob[:batch_size].to(dtype=torch.float32))
         buffer["value"].index_copy_(0, indices, value[:batch_size].to(dtype=torch.float32))
@@ -708,6 +809,9 @@ class PPOTrainer(Trainer):
         rewards_all = buffer["reward"].index_select(0, ordered_indices).to(dtype=torch.float32)
         dones_all = buffer["done"].index_select(0, ordered_indices)
         valid_all = buffer["valid"].index_select(0, ordered_indices)
+        features_all = (
+            buffer["features"].index_select(0, ordered_indices) if "features" in buffer else None
+        )
         final_values = self._tensor_final_values.get(
             agent.agent_id,
             torch.zeros(env_count, dtype=torch.float32, device=self.device),
@@ -750,13 +854,16 @@ class PPOTrainer(Trainer):
                 mb_positions = valid_positions.index_select(0, mb_valid_positions)
                 mb_buffer_indices = ordered_indices.index_select(0, mb_positions)
                 observations = buffer["obs"].index_select(0, mb_buffer_indices)
+                feature_batch = (
+                    features_all.index_select(0, mb_positions) if features_all is not None else None
+                )
                 actions = actions_all.index_select(0, mb_positions)
                 old_log_probs = old_log_probs_all.index_select(0, mb_positions)
                 policy_advantages = policy_advantages_all.index_select(0, mb_positions)
                 returns = returns_all.index_select(0, mb_positions)
 
                 with self._autocast_context():
-                    logits, value = agent.policy(observations)
+                    logits, value = self._policy_forward(agent.policy, observations, feature_batch)
                 logits_f32 = logits.to(dtype=torch.float32)
                 value_f32 = value.squeeze(-1).to(dtype=torch.float32)
                 if not bool(torch.isfinite(logits_f32).all().item()):
@@ -824,6 +931,11 @@ class PPOTrainer(Trainer):
             training_logger.warning(
                 "Weights & Biases API unavailable. If installed, check for local module shadowing."
                 f"{suffix}"
+            )
+        if self.rollout_action_mode == "random":
+            training_logger.warning(
+                "Rollout action mode is set to random. Throughput measurements are valid, "
+                "but policy learning metrics are not meaningful in this mode."
             )
 
     def _finish_logging(self):
@@ -994,15 +1106,24 @@ class PPOTrainer(Trainer):
             obs_tensor = self._prepare_obs_tensor(obs)
             batch_envs = obs_tensor.shape[0]
             active_mask = self._active_env_mask(obs, batch_envs)
+            feature_tensor = self._prepare_feature_tensor(obs, batch_envs)
             local_obs_tensor = self._prepare_local_obs_tensor(obs, batch_envs)
 
             if self.use_ctde:
                 self._ensure_tensor_buffers(
                     tuple(local_obs_tensor.shape[2:]),
                     global_obs_shape=tuple(obs_tensor.shape[1:]),
+                    feature_shape=tuple(feature_tensor.shape[1:])
+                    if feature_tensor is not None
+                    else None,
                 )
             else:
-                self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
+                self._ensure_tensor_buffers(
+                    tuple(obs_tensor.shape[1:]),
+                    feature_shape=tuple(feature_tensor.shape[1:])
+                    if feature_tensor is not None
+                    else None,
+                )
 
             collected_agent_data: Dict[int, Dict[str, torch.Tensor]] = {}
             env_actions = torch.zeros(
@@ -1021,13 +1142,15 @@ class PPOTrainer(Trainer):
                 for agent in self.agents:
                     actor_obs = local_obs_tensor[:, agent.agent_id] if self.use_ctde else obs_tensor
                     with self._autocast_context():
-                        logits, value = agent.policy(actor_obs)
+                        logits, value = self._policy_forward(
+                            agent.policy,
+                            actor_obs,
+                            feature_tensor,
+                        )
                     logits_f32 = logits.to(dtype=torch.float32)
                     if not bool(torch.isfinite(logits_f32).all().item()):
                         raise RuntimeError("Non-finite logits detected during action sampling")
-                    dist = torch.distributions.Categorical(logits=logits_f32)
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action).to(dtype=torch.float32)
+                    action, log_prob = self._select_rollout_actions(logits_f32)
 
                     collected_agent_data[agent.agent_id] = {
                         "action": action.detach(),
@@ -1072,6 +1195,7 @@ class PPOTrainer(Trainer):
                 self._tensor_buffer_add(
                     agent_id,
                     obs=actor_obs_batch,
+                    features=feature_tensor.detach() if feature_tensor is not None else None,
                     global_obs=obs_batch if self.use_ctde else None,
                     action=agent_data["action"],
                     log_prob=agent_data["log_prob"],
@@ -1150,7 +1274,13 @@ class PPOTrainer(Trainer):
                 if current_active_mask is None
                 else current_active_mask
             )
-            self._ensure_tensor_buffers(tuple(obs_tensor.shape[1:]))
+            feature_tensor = self._prepare_feature_tensor(obs, batch_envs)
+            self._ensure_tensor_buffers(
+                tuple(obs_tensor.shape[1:]),
+                feature_shape=tuple(feature_tensor.shape[1:])
+                if feature_tensor is not None
+                else None,
+            )
 
             actions_per_env: List[Dict[int, int]] | None = None
             action_tensors: List[torch.Tensor] = []
@@ -1162,13 +1292,15 @@ class PPOTrainer(Trainer):
                 agent.policy.eval()
                 with torch.no_grad():
                     with self._autocast_context():
-                        logits, value = agent.policy(obs_tensor)
+                        logits, value = self._policy_forward(
+                            agent.policy,
+                            obs_tensor,
+                            feature_tensor,
+                        )
                     logits_f32 = logits.to(dtype=torch.float32)
                     if not bool(torch.isfinite(logits_f32).all().item()):
                         raise RuntimeError("Non-finite logits detected during action sampling")
-                    dist = torch.distributions.Categorical(logits=logits_f32)
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action).to(dtype=torch.float32)
+                    action, log_prob = self._select_rollout_actions(logits_f32)
 
                 collected_agent_data[agent.agent_id] = {
                     "action": action,
@@ -1243,6 +1375,7 @@ class PPOTrainer(Trainer):
                 self._tensor_buffer_add(
                     agent_id,
                     obs=obs_batch,
+                    features=feature_tensor.detach() if feature_tensor is not None else None,
                     action=agent_data["action"].detach(),
                     log_prob=agent_data["log_prob"].detach(),
                     value=agent_data["value"].detach(),
