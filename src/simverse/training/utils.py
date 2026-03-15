@@ -253,7 +253,9 @@ def run_ppo_training(
     )
     resolved_replay_dir = episode_save_dir
     if episode_save_dir:
-        resolved_replay_dir = str(loss_trainer.stats.ensure_recording_run_dir(episode_save_dir))
+        resolved_replay_dir = str(
+            loss_trainer.stats.ensure_recording_run_dir(episode_save_dir).resolve()
+        )
     game_slug = _infer_render_game_slug(title, resolved_replay_dir)
     live_url, replay_url = _build_render_urls(game_slug, resolved_replay_dir)
     training_logger.info(f"Live render URL:   {live_url}")

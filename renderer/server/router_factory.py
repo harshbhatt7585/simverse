@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _read_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
@@ -26,7 +28,10 @@ def create_game_router(
 
     def replay_dir(override_dir: str | None = None) -> Path:
         configured = override_dir if override_dir else os.getenv(replay_env_var, default_replay_dir)
-        return Path(configured)
+        candidate = Path(configured).expanduser()
+        if candidate.is_absolute():
+            return candidate
+        return PROJECT_ROOT / candidate
 
     def all_replay_files(override_dir: str | None = None) -> list[Path]:
         directory = replay_dir(override_dir)
