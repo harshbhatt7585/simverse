@@ -1,41 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import GameRenderer from './GameRenderer'
-import type {
-  GenericFrame,
-  RenderGame,
-  ReplayDetail,
-  ReplaySummary,
-  ReplaysResponse,
-  ViewMode,
-} from './types'
+import type { GenericFrame, RenderGame, ReplayDetail, ReplaySummary, ReplaysResponse } from './types'
 import { firstScalar, parseNumber, parseReward, resolveUrl } from './utils'
 
 type ReplayProps = {
   game: RenderGame
   onGameChange: (game: RenderGame) => void
-  viewMode: ViewMode
-  onViewModeChange: (mode: ViewMode) => void
   replayDir: string
   onReplayDirChange: (nextDir: string) => void
   baseUrl: string
 }
 
-function Replay({
-  game,
-  onGameChange,
-  viewMode,
-  onViewModeChange,
-  replayDir,
-  onReplayDirChange,
-  baseUrl,
-}: ReplayProps) {
-  type ReplayUpdateEvent = {
-    replay_count?: number
-    latest_replay_id?: string | null
-    latest_frame_index?: number
-  }
-
+function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: ReplayProps) {
   const [episodes, setEpisodes] = useState<ReplaySummary[]>([])
   const [selectedReplayId, setSelectedReplayId] = useState('')
   const [selectedReplay, setSelectedReplay] = useState<ReplayDetail | null>(null)
@@ -45,9 +22,7 @@ function Replay({
   const [status, setStatus] = useState('Loading replays...')
   const [error, setError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
-  const [liveUpdateToken, setLiveUpdateToken] = useState(0)
-  const [followLatest, setFollowLatest] = useState(viewMode === 'live')
-  const lastReplayUpdateRef = useRef<ReplayUpdateEvent | null>(null)
+  const [pendingReplayDir, setPendingReplayDir] = useState(replayDir)
 
   const selectedReplayName = useMemo(() => {
     if (selectedReplay?.name) {
@@ -63,7 +38,6 @@ function Replay({
   const frames = Array.isArray(selectedReplay?.data?.frames) ? selectedReplay.data.frames : []
   const currentFrame: GenericFrame | null =
     frames.length > 0 ? frames[Math.max(0, Math.min(frameIndex, frames.length - 1))] : null
-  const [pendingReplayDir, setPendingReplayDir] = useState(replayDir)
 
   useEffect(() => {
     setPendingReplayDir(replayDir)
@@ -80,62 +54,6 @@ function Replay({
   }
 
   useEffect(() => {
-    if (viewMode === 'live') {
-      setFollowLatest(true)
-      setPlaying(false)
-      setRefreshToken((value) => value + 1)
-      setLiveUpdateToken((value) => value + 1)
-    }
-  }, [viewMode])
-
-  useEffect(() => {
-    if (viewMode !== 'live') {
-      return
-    }
-    const eventsUrl = resolveUrl(baseUrl, resolveApiPath('/replays/events'))
-    const eventSource = new EventSource(eventsUrl)
-    const onReplayUpdate = (event: MessageEvent) => {
-      let payload: ReplayUpdateEvent = {}
-      try {
-        payload = JSON.parse(event.data) as ReplayUpdateEvent
-      } catch (_err) {
-        return
-      }
-      const previous = lastReplayUpdateRef.current
-      lastReplayUpdateRef.current = payload
-      const replayCount = typeof payload.replay_count === 'number' ? payload.replay_count : 0
-      const latestReplayId =
-        typeof payload.latest_replay_id === 'string' ? payload.latest_replay_id : ''
-      const latestFrameIndex =
-        typeof payload.latest_frame_index === 'number' ? payload.latest_frame_index : -1
-      const replayChanged =
-        !previous ||
-        previous.replay_count !== replayCount ||
-        previous.latest_replay_id !== latestReplayId
-      const frameChanged = !previous || previous.latest_frame_index !== latestFrameIndex
-      if (replayChanged) {
-        setRefreshToken((value) => value + 1)
-      }
-      if (!latestReplayId) {
-        return
-      }
-      setFollowLatest(true)
-      setSelectedReplayId(latestReplayId)
-      if (replayChanged || frameChanged) {
-        setLiveUpdateToken((value) => value + 1)
-      }
-    }
-    eventSource.addEventListener('replay_update', onReplayUpdate)
-    eventSource.onerror = () => {
-      // 20s polling remains active as fallback when SSE temporarily drops.
-    }
-    return () => {
-      eventSource.removeEventListener('replay_update', onReplayUpdate)
-      eventSource.close()
-    }
-  }, [baseUrl, replayDir, viewMode])
-
-  useEffect(() => {
     const timer = window.setInterval(() => {
       setRefreshToken((value) => value + 1)
     }, 20_000)
@@ -148,7 +66,7 @@ function Replay({
   useEffect(() => {
     void (async () => {
       setError('')
-      setStatus(followLatest ? 'Watching replay directory for new episodes...' : 'Loading replays...')
+      setStatus('Loading replays...')
       try {
         const response = await fetch(resolveUrl(baseUrl, resolveApiPath('/replays/')), {
           cache: 'no-store',
@@ -177,45 +95,44 @@ function Replay({
           setSelectedReplayId('')
           setSelectedReplay(null)
           setFrameIndex(0)
+          setPlaying(false)
           setStatus('No replay JSON files found yet.')
           return
         }
 
         const latestReplayId = nextEpisodes[nextEpisodes.length - 1]?.id ?? ''
         setSelectedReplayId((currentId) => {
-          if (followLatest) {
-            return latestReplayId
-          }
           if (nextEpisodes.some((episode) => episode.id === currentId)) {
             return currentId
           }
           return latestReplayId
         })
-        setStatus(
-          followLatest
-            ? `Watching ${nextEpisodes.length} replay files. Latest: ${latestReplayId}`
-            : `Loaded ${nextEpisodes.length} replay files.`,
-        )
+        setStatus(`Loaded ${nextEpisodes.length} replay files.`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
       }
     })()
-  }, [baseUrl, followLatest, refreshToken, replayDir])
+  }, [baseUrl, refreshToken, replayDir])
 
-  const loadSelectedReplay = (targetReplayId: string, pinToLatestFrame: boolean) => {
+  useEffect(() => {
+    if (!selectedReplayId) {
+      setSelectedReplay(null)
+      return
+    }
+
     void (async () => {
       setError('')
-      setStatus(`Loading replay ${targetReplayId}...`)
+      setStatus(`Loading replay ${selectedReplayId}...`)
       try {
         const response = await fetch(
-          resolveUrl(baseUrl, resolveApiPath(`/replays/${encodeURIComponent(targetReplayId)}`)),
+          resolveUrl(baseUrl, resolveApiPath(`/replays/${encodeURIComponent(selectedReplayId)}`)),
           {
             cache: 'no-store',
           },
         )
         if (!response.ok) {
-          throw new Error(`Unable to load replay ${targetReplayId} (${response.status})`)
+          throw new Error(`Unable to load replay ${selectedReplayId} (${response.status})`)
         }
 
         const payload = (await response.json()) as ReplayDetail
@@ -224,34 +141,13 @@ function Replay({
         }
 
         setSelectedReplay(payload)
-        if (pinToLatestFrame) {
-          const nextFrames = Array.isArray(payload.data?.frames) ? payload.data.frames : []
-          setFrameIndex(Math.max(nextFrames.length - 1, 0))
-        }
+        setFrameIndex(0)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
       }
     })()
-  }
-
-  useEffect(() => {
-    if (!selectedReplayId) {
-      setSelectedReplay(null)
-      return
-    }
-    loadSelectedReplay(selectedReplayId, viewMode === 'live')
-    if (viewMode !== 'live') {
-      setFrameIndex(0)
-    }
-  }, [baseUrl, replayDir, selectedReplayId, viewMode])
-
-  useEffect(() => {
-    if (viewMode !== 'live' || !selectedReplayId) {
-      return
-    }
-    loadSelectedReplay(selectedReplayId, true)
-  }, [baseUrl, liveUpdateToken, replayDir, selectedReplayId, viewMode])
+  }, [baseUrl, replayDir, selectedReplayId])
 
   const selectEpisodeByOffset = (offset: number, autoPlay = false) => {
     if (episodes.length === 0 || selectedReplayIndex < 0) {
@@ -262,7 +158,6 @@ function Replay({
     if (!nextEpisode) {
       return
     }
-    setFollowLatest(nextIndex === episodes.length - 1)
     setSelectedReplayId(nextEpisode.id)
     setFrameIndex(0)
     setPlaying(autoPlay)
@@ -341,37 +236,14 @@ function Replay({
         <label className="inline-label" htmlFor="replay-game">
           Game
         </label>
-        <div className="control-row compact">
-          <button
-            type="button"
-            className={viewMode === 'live' ? 'active-mode' : ''}
-            onClick={() => {
-              onViewModeChange('live')
-            }}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            className={viewMode === 'replay' ? 'active-mode' : ''}
-            onClick={() => {
-              onViewModeChange('replay')
-            }}
-          >
-            Replay
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setRefreshToken((value) => value + 1)
-              if (viewMode === 'live') {
-                setLiveUpdateToken((value) => value + 1)
-              }
-            }}
-          >
-            Sync now
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setRefreshToken((value) => value + 1)
+          }}
+        >
+          Sync now
+        </button>
         <label className="inline-label" htmlFor="replay-dir">
           Replay Directory (optional)
         </label>
@@ -392,7 +264,6 @@ function Replay({
             setSelectedReplay(null)
             setFrameIndex(0)
             setPlaying(false)
-            setFollowLatest(true)
             setRefreshToken((value) => value + 1)
           }}
         >
@@ -407,7 +278,6 @@ function Replay({
             setSelectedReplay(null)
             setFrameIndex(0)
             setPlaying(false)
-            setFollowLatest(true)
             setRefreshToken((value) => value + 1)
           }}
         >
@@ -423,14 +293,11 @@ function Replay({
           id="replay-episode"
           value={selectedReplayId}
           onChange={(event) => {
-            const nextReplayId = event.target.value
-            const latestReplayId = episodes[episodes.length - 1]?.id ?? ''
-            setFollowLatest(nextReplayId === latestReplayId)
             setSelectedReplayId(event.target.value)
             setFrameIndex(0)
             setPlaying(false)
           }}
-          disabled={episodes.length === 0 || viewMode === 'live'}
+          disabled={episodes.length === 0}
         >
           {episodes.map((episode) => (
             <option key={episode.id} value={episode.id}>
@@ -442,7 +309,7 @@ function Replay({
         <div className="control-row compact">
           <button
             type="button"
-            disabled={episodes.length === 0 || viewMode === 'live'}
+            disabled={episodes.length === 0}
             onClick={() => {
               selectEpisodeByOffset(-1, false)
             }}
@@ -451,7 +318,7 @@ function Replay({
           </button>
           <button
             type="button"
-            disabled={frames.length === 0 || viewMode === 'live'}
+            disabled={frames.length === 0}
             onClick={() => {
               setPlaying((value) => !value)
             }}
@@ -460,7 +327,7 @@ function Replay({
           </button>
           <button
             type="button"
-            disabled={episodes.length === 0 || viewMode === 'live'}
+            disabled={episodes.length === 0}
             onClick={() => {
               selectEpisodeByOffset(1, true)
             }}
@@ -482,7 +349,6 @@ function Replay({
           onChange={(event) => {
             setSpeed(parseNumber(event.target.value, 1))
           }}
-          disabled={viewMode === 'live'}
         />
 
         <label className="inline-label" htmlFor="replay-seek">
@@ -498,19 +364,8 @@ function Replay({
           onChange={(event) => {
             setFrameIndex(parseInt(event.target.value, 10) || 0)
           }}
-          disabled={frames.length === 0 || viewMode === 'live'}
+          disabled={frames.length === 0}
         />
-
-        <button
-          type="button"
-          className="full"
-          onClick={() => {
-            setFollowLatest(true)
-            setRefreshToken((value) => value + 1)
-          }}
-        >
-          {followLatest ? 'Following latest' : 'Follow latest'}
-        </button>
 
         <pre className="status">{status}</pre>
         {error ? <p className="error">{error}</p> : null}

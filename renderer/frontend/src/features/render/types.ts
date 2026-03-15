@@ -1,4 +1,3 @@
-export type ViewMode = 'live' | 'replay'
 export type RenderGame = 'snake' | 'maze' | 'battle-grid'
 
 export type GenericFrame = {
