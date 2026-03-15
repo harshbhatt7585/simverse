@@ -31,6 +31,11 @@ button:hover {
   background: rgba(27, 40, 55, 0.95);
 }
 
+.active-mode {
+  border-color: rgba(77, 156, 255, 0.8);
+  background: rgba(35, 70, 120, 0.9);
+}
+
 .viewer-grid {
   display: grid;
   grid-template-columns: auto 360px;
