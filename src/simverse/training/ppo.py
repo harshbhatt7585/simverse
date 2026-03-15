@@ -822,20 +822,22 @@ class PPOTrainer(Trainer):
             updates = 0
 
             for start in range(0, sample_count, self.batch_size):
-                mb_valid_positions = permutation[start : start + self.batch_size]
-                if mb_valid_positions.numel() == 0:
+                mini_batch_valid_positions = permutation[start : start + self.batch_size]
+                if mini_batch_valid_positions.numel() == 0:
                     continue
 
-                mb_positions = valid_positions.index_select(0, mb_valid_positions)
-                mb_buffer_indices = ordered_indices.index_select(0, mb_positions)
-                observations = buffer["obs"].index_select(0, mb_buffer_indices)
+                mini_batch_positions = valid_positions.index_select(0, mini_batch_valid_positions)
+                mini_batch_buffer_indices = ordered_indices.index_select(0, mini_batch_positions)
+                observations = buffer["obs"].index_select(0, mini_batch_buffer_indices)
                 feature_batch = (
-                    features_all.index_select(0, mb_positions) if features_all is not None else None
+                    features_all.index_select(0, mini_batch_positions)
+                    if features_all is not None
+                    else None
                 )
-                actions = actions_all.index_select(0, mb_positions)
-                old_log_probs = old_log_probs_all.index_select(0, mb_positions)
-                policy_advantages = policy_advantages_all.index_select(0, mb_positions)
-                returns = returns_all.index_select(0, mb_positions)
+                actions = actions_all.index_select(0, mini_batch_positions)
+                old_log_probs = old_log_probs_all.index_select(0, mini_batch_positions)
+                policy_advantages = policy_advantages_all.index_select(0, mini_batch_positions)
+                returns = returns_all.index_select(0, mini_batch_positions)
 
                 with self._autocast_context():
                     logits, value = self._policy_forward(agent.policy, observations, feature_batch)
@@ -865,7 +867,9 @@ class PPOTrainer(Trainer):
                 self._optimizer_step(optimizer, loss, agent.policy)
 
                 if self.use_ctde:
-                    sampled_global_obs = buffer["global_obs"].index_select(0, mb_buffer_indices)
+                    sampled_global_obs = buffer["global_obs"].index_select(
+                        0, mini_batch_buffer_indices
+                    )
                     if self.centralized_critic_optimizer is None:
                         raise RuntimeError("Missing centralized critic optimizer for CTDE")
                     with self._autocast_context():
