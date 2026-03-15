@@ -7,12 +7,10 @@ import { firstScalar, parseNumber, parseReward, resolveUrl } from './utils'
 type ReplayProps = {
   game: RenderGame
   onGameChange: (game: RenderGame) => void
-  replayDir: string
-  onReplayDirChange: (nextDir: string) => void
   baseUrl: string
 }
 
-function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: ReplayProps) {
+function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
   const [selectedReplay, setSelectedReplay] = useState<ReplayDetail | null>(null)
   const [frameIndex, setFrameIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -20,24 +18,10 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
   const [status, setStatus] = useState('Loading replay...')
   const [error, setError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
-  const [pendingReplayDir, setPendingReplayDir] = useState(replayDir)
 
   const frames = Array.isArray(selectedReplay?.data?.frames) ? selectedReplay.data.frames : []
   const currentFrame: GenericFrame | null =
     frames.length > 0 ? frames[Math.max(0, Math.min(frameIndex, frames.length - 1))] : null
-
-  useEffect(() => {
-    setPendingReplayDir(replayDir)
-  }, [replayDir])
-
-  const resolveApiPath = (path: string): string => {
-    if (!replayDir.trim()) {
-      return path
-    }
-    const searchParams = new URLSearchParams()
-    searchParams.set('dir', replayDir.trim())
-    return `${path}?${searchParams.toString()}`
-  }
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -54,7 +38,7 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
       setError('')
       setStatus('Loading replay...')
       try {
-        const response = await fetch(resolveUrl(baseUrl, resolveApiPath('/replay/')), {
+        const response = await fetch(resolveUrl(baseUrl, '/replay/'), {
           cache: 'no-store',
         })
         if (!response.ok) {
@@ -83,7 +67,7 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
         setSelectedReplay(null)
       }
     })()
-  }, [baseUrl, refreshToken, replayDir])
+  }, [baseUrl, refreshToken])
 
   useEffect(() => {
     if (frameIndex >= frames.length) {
@@ -133,7 +117,6 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
     setStatus(
       [
         `game: ${game}`,
-        `dir: ${replayDir || '(default)'}`,
         `file: ${selectedReplay?.name ?? 'replay.json'}`,
         `episode: ${episode}`,
         `frame: ${frameIndex + 1}/${frames.length}`,
@@ -145,7 +128,7 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
         `steps: ${steps}`,
       ].join('\n'),
     )
-  }, [currentFrame, error, frameIndex, frames.length, game, replayDir, selectedReplay?.name])
+  }, [currentFrame, error, frameIndex, frames.length, game, selectedReplay?.name])
 
   return (
     <div className="viewer-grid">
@@ -156,38 +139,6 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
         <label className="inline-label" htmlFor="replay-game">
           Game
         </label>
-        <button
-          type="button"
-          onClick={() => {
-            setRefreshToken((value) => value + 1)
-          }}
-        >
-          Sync now
-        </button>
-        <label className="inline-label" htmlFor="replay-dir">
-          Replay Directory (optional)
-        </label>
-        <input
-          id="replay-dir"
-          type="text"
-          placeholder="recordings/snake or /abs/path/to/replays"
-          value={pendingReplayDir}
-          onChange={(event) => {
-            setPendingReplayDir(event.target.value)
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => {
-            onReplayDirChange(pendingReplayDir.trim())
-            setSelectedReplay(null)
-            setFrameIndex(0)
-            setPlaying(false)
-            setRefreshToken((value) => value + 1)
-          }}
-        >
-          Use Directory
-        </button>
         <select
           id="replay-game"
           value={game}
@@ -249,22 +200,6 @@ function Replay({ game, onGameChange, replayDir, onReplayDirChange, baseUrl }: R
           onChange={(event) => {
             setSpeed(parseNumber(event.target.value, 1))
           }}
-        />
-
-        <label className="inline-label" htmlFor="replay-seek">
-          Frame
-        </label>
-        <input
-          id="replay-seek"
-          type="range"
-          min={0}
-          max={Math.max(frames.length - 1, 0)}
-          step={1}
-          value={Math.max(0, Math.min(frameIndex, Math.max(frames.length - 1, 0)))}
-          onChange={(event) => {
-            setFrameIndex(parseInt(event.target.value, 10) || 0)
-          }}
-          disabled={frames.length === 0}
         />
 
         <pre className="status">{status}</pre>
