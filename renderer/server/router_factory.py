@@ -37,6 +37,9 @@ def create_game_router(
         directory = replay_dir(override_dir)
         if not directory.exists():
             return []
+        single_replay_file = directory / "replay.json"
+        if single_replay_file.is_file():
+            return [single_replay_file]
         all_files = sorted(p for p in directory.rglob("*.json") if p.is_file())
         nested_files = [path for path in all_files if path.parent != directory]
         if not nested_files:
@@ -161,5 +164,19 @@ def create_game_router(
                 "data": _read_json(path),
             }
         raise HTTPException(status_code=404, detail=f"Replay not found: {replay_id}")
+
+    @router.get("/replay")
+    @router.get("/replay/")
+    def get_single_replay(dir: str | None = None) -> dict[str, Any]:
+        files = all_replay_files(dir)
+        if not files:
+            raise HTTPException(status_code=404, detail="Replay not found")
+        directory = replay_dir(dir)
+        path = files[-1]
+        return {
+            "id": replay_id_for_path(path, directory),
+            "name": replay_name_for_path(path, directory),
+            "data": _read_json(path),
+        }
 
     return router

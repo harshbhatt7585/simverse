@@ -48,14 +48,12 @@ def _infer_render_game_slug(title: str, episode_save_dir: str | None) -> str:
     return "snake"
 
 
-def _build_render_urls(game_slug: str, replay_dir: str | None) -> tuple[str, str]:
+def _build_render_url(game_slug: str, replay_dir: str | None) -> str:
     render_base = os.getenv("SIMVERSE_RENDER_URL", "http://127.0.0.1:5173/render").rstrip("/")
     params = {"game": game_slug}
     if replay_dir:
         params["dir"] = replay_dir
-    live_url = f"{render_base}?{urlencode({**params, 'mode': 'live'})}"
-    replay_url = f"{render_base}?{urlencode({**params, 'mode': 'replay'})}"
-    return live_url, replay_url
+    return f"{render_base}?{urlencode(params)}"
 
 
 def resolve_torch_device(*, prefer_mps: bool = True) -> str:
@@ -251,15 +249,12 @@ def run_ppo_training(
         loss_trainer=loss_trainer,
         agent_factory=agent_factory,
     )
-    resolved_replay_dir = episode_save_dir
-    if episode_save_dir:
-        resolved_replay_dir = str(
-            loss_trainer.stats.ensure_recording_run_dir(episode_save_dir).resolve()
-        )
+    resolved_replay_dir = (
+        str(Path(episode_save_dir).expanduser().resolve()) if episode_save_dir else None
+    )
     game_slug = _infer_render_game_slug(title, resolved_replay_dir)
-    live_url, replay_url = _build_render_urls(game_slug, resolved_replay_dir)
-    training_logger.info(f"Live render URL:   {live_url}")
-    training_logger.info(f"Replay render URL: {replay_url}")
+    render_url = _build_render_url(game_slug, resolved_replay_dir)
+    training_logger.info(f"Render URL: {render_url}")
     previous_clone_payload_tensors = getattr(env, "clone_payload_tensors", None)
     fast_payload_toggled = hasattr(env, "set_fast_payload_mode")
     if fast_payload_toggled:

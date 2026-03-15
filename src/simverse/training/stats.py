@@ -10,7 +10,6 @@ if __package__ is None or __package__.startswith("__main__"):
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, DefaultDict, Dict, List, Optional
 
 import numpy as np
@@ -64,7 +63,6 @@ class TrainingStats:
     )
     current_episode_frames: List[Dict[str, Any]] = field(default_factory=list)
     env_count: int = 1
-    _recording_run_dir: Path | None = field(default=None, init=False, repr=False)
 
     def push_experience(self, experience: Experience) -> None:
         self.experiences.append(experience)
@@ -172,7 +170,8 @@ class TrainingStats:
         episode: int,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Path:
-        run_dir = self.ensure_recording_run_dir(output_dir)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         payload: Dict[str, Any] = {
             "episode": episode,
             "steps": self.steps,
@@ -184,24 +183,10 @@ class TrainingStats:
         }
         if metadata:
             payload["metadata"] = metadata
-        output_path = run_dir / f"episode_{episode:04d}.json"
+        output_path = output_dir / "replay.json"
         output_path.write_text(json.dumps(payload, indent=2, default=_json_default))
         self.current_episode_frames.clear()
         return output_path
-
-    def ensure_recording_run_dir(self, output_dir: str | Path) -> Path:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        if self._recording_run_dir is None or self._recording_run_dir.parent != output_dir:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            run_dir = output_dir / timestamp
-            suffix = 1
-            while run_dir.exists():
-                run_dir = output_dir / f"{timestamp}_{suffix:02d}"
-                suffix += 1
-            run_dir.mkdir(parents=True, exist_ok=True)
-            self._recording_run_dir = run_dir
-        return self._recording_run_dir
 
 
 if __name__ == "__main__":
