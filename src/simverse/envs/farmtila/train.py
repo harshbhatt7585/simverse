@@ -25,13 +25,14 @@ def agent_factory(agent_id: int, policy: torch.nn.Module, env: FarmtilaEnv) -> F
 def train(
     num_agents: int = 2,
     episodes: int = 100,
+    max_steps: int = 1500,
     use_wandb: bool = True,
     use_compile: bool = True,
 ):
     training_config = build_training_config(
         num_agents=max(1, int(num_agents)),
         num_envs=2048,
-        max_steps=1500,
+        max_steps=max(1, int(max_steps)),
         episodes=max(1, int(episodes)),
         training_epochs=1,
         lr=0.001,

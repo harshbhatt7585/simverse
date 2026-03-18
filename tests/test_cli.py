@@ -145,3 +145,22 @@ def test_train_with_episodes_passes_flag_to_supported_trainer(monkeypatch) -> No
 
     assert result.exit_code == 0
     assert calls == [25]
+
+
+def test_train_with_max_steps_passes_flag_to_supported_trainer(monkeypatch) -> None:
+    runner = CliRunner()
+    calls: list[int] = []
+
+    def fake_trainer(*, max_steps: int = 1500) -> None:
+        calls.append(max_steps)
+
+    monkeypatch.setitem(
+        cli_module.TRAINERS,
+        "farmtila",
+        cli_module.TrainEntry("Farmtila", fake_trainer, fixed_num_agents=2),
+    )
+
+    result = runner.invoke(cli_module.app, ["train", "farmtila", "--max-steps", "300"])
+
+    assert result.exit_code == 0
+    assert calls == [300]
