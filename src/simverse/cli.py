@@ -78,6 +78,12 @@ def train(
         min=1,
         help="Override the number of training episodes when the selected trainer supports it.",
     ),
+    max_steps: int | None = typer.Option(
+        None,
+        "--max-steps",
+        min=1,
+        help="Override the max steps per episode when the selected trainer supports it.",
+    ),
 ):
     """Run a built-in environment training entrypoint."""
 
@@ -136,6 +142,8 @@ def train(
             trainer_kwargs["num_agents"] = num_agents
         if episodes is not None and "episodes" in trainer_signature.parameters:
             trainer_kwargs["episodes"] = episodes
+        if max_steps is not None and "max_steps" in trainer_signature.parameters:
+            trainer_kwargs["max_steps"] = max_steps
         trainer(**trainer_kwargs)
     finally:
         if replay_services is not None:
