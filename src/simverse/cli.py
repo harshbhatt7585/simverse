@@ -66,6 +66,12 @@ def train(
         "--wandb",
         help="Enable Weights & Biases logging when the selected trainer supports it.",
     ),
+    num_agents: int | None = typer.Option(
+        None,
+        "--num-agents",
+        min=1,
+        help="Override the number of agents when the selected trainer supports it.",
+    ),
 ):
     """Run a built-in environment training entrypoint."""
 
@@ -106,9 +112,12 @@ def train(
     trainer = trainer_entry.trainer
     typer.echo(f"Starting {display_name} training")
     try:
-        trainer_kwargs: dict[str, bool] = {}
+        trainer_kwargs: dict[str, bool | int] = {}
+        trainer_signature = inspect.signature(trainer)
         if wandb and "use_wandb" in inspect.signature(trainer).parameters:
             trainer_kwargs["use_wandb"] = True
+        if num_agents is not None and "num_agents" in trainer_signature.parameters:
+            trainer_kwargs["num_agents"] = num_agents
         trainer(**trainer_kwargs)
     finally:
         if replay_services is not None:

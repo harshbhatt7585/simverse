@@ -88,3 +88,22 @@ def test_train_with_wandb_passes_flag_to_supported_trainer(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert calls == [True]
+
+
+def test_train_with_num_agents_passes_flag_to_supported_trainer(monkeypatch) -> None:
+    runner = CliRunner()
+    calls: list[int] = []
+
+    def fake_trainer(*, num_agents: int = 2) -> None:
+        calls.append(num_agents)
+
+    monkeypatch.setitem(
+        cli_module.TRAINERS,
+        "farmtila",
+        cli_module.TrainEntry("Farmtila", fake_trainer),
+    )
+
+    result = runner.invoke(cli_module.app, ["train", "farmtila", "--num-agents", "8"])
+
+    assert result.exit_code == 0
+    assert calls == [8]
