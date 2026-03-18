@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -17,7 +18,7 @@ from simverse.replay_server import start_replay_services, stop_replay_services
 
 app = typer.Typer(help="Simverse RL quickstart utilities")
 
-TrainFn = Callable[[], None]
+TrainFn = Callable[..., None]
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,11 @@ def train(
         "--replay",
         help="Launch the replay backend and, when available, the replay UI during training.",
     ),
+    wandb: bool = typer.Option(
+        False,
+        "--wandb",
+        help="Enable Weights & Biases logging when the selected trainer supports it.",
+    ),
 ):
     """Run a built-in environment training entrypoint."""
 
@@ -100,7 +106,10 @@ def train(
     trainer = trainer_entry.trainer
     typer.echo(f"Starting {display_name} training")
     try:
-        trainer()
+        trainer_kwargs: dict[str, bool] = {}
+        if wandb and "use_wandb" in inspect.signature(trainer).parameters:
+            trainer_kwargs["use_wandb"] = True
+        trainer(**trainer_kwargs)
     finally:
         if replay_services is not None:
             stop_replay_services(replay_services)

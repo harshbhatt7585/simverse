@@ -69,3 +69,22 @@ def test_train_with_replay_rejects_unsupported_env(monkeypatch) -> None:
     assert result.exit_code != 0
     combined_output = f"{result.stdout}\n{getattr(result, 'stderr', '')}"
     assert "Replay mode is only supported" in combined_output
+
+
+def test_train_with_wandb_passes_flag_to_supported_trainer(monkeypatch) -> None:
+    runner = CliRunner()
+    calls: list[bool] = []
+
+    def fake_trainer(*, use_wandb: bool = False) -> None:
+        calls.append(use_wandb)
+
+    monkeypatch.setitem(
+        cli_module.TRAINERS,
+        "snake",
+        cli_module.TrainEntry("Snake", fake_trainer),
+    )
+
+    result = runner.invoke(cli_module.app, ["train", "snake", "--wandb"])
+
+    assert result.exit_code == 0
+    assert calls == [True]
