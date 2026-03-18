@@ -100,10 +100,48 @@ def test_train_with_num_agents_passes_flag_to_supported_trainer(monkeypatch) -> 
     monkeypatch.setitem(
         cli_module.TRAINERS,
         "farmtila",
-        cli_module.TrainEntry("Farmtila", fake_trainer),
+        cli_module.TrainEntry("Farmtila", fake_trainer, fixed_num_agents=2),
+    )
+
+    result = runner.invoke(cli_module.app, ["train", "farmtila", "--num-agents", "2"])
+
+    assert result.exit_code == 0
+    assert calls == [2]
+
+
+def test_train_with_invalid_num_agents_for_fixed_agent_env_fails(monkeypatch) -> None:
+    runner = CliRunner()
+
+    def fake_trainer(*, num_agents: int = 2) -> None:
+        raise AssertionError("trainer should not be called")
+
+    monkeypatch.setitem(
+        cli_module.TRAINERS,
+        "farmtila",
+        cli_module.TrainEntry("Farmtila", fake_trainer, fixed_num_agents=2),
     )
 
     result = runner.invoke(cli_module.app, ["train", "farmtila", "--num-agents", "8"])
 
+    assert result.exit_code != 0
+    combined_output = f"{result.stdout}\n{getattr(result, 'stderr', '')}"
+    assert "requires exactly 2 agents" in combined_output
+
+
+def test_train_with_episodes_passes_flag_to_supported_trainer(monkeypatch) -> None:
+    runner = CliRunner()
+    calls: list[int] = []
+
+    def fake_trainer(*, episodes: int = 100) -> None:
+        calls.append(episodes)
+
+    monkeypatch.setitem(
+        cli_module.TRAINERS,
+        "farmtila",
+        cli_module.TrainEntry("Farmtila", fake_trainer, fixed_num_agents=2),
+    )
+
+    result = runner.invoke(cli_module.app, ["train", "farmtila", "--episodes", "25"])
+
     assert result.exit_code == 0
-    assert calls == [8]
+    assert calls == [25]

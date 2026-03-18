@@ -72,6 +72,12 @@ def train(
         min=1,
         help="Override the number of agents when the selected trainer supports it.",
     ),
+    episodes: int | None = typer.Option(
+        None,
+        "--episodes",
+        min=1,
+        help="Override the number of training episodes when the selected trainer supports it.",
+    ),
 ):
     """Run a built-in environment training entrypoint."""
 
@@ -110,14 +116,26 @@ def train(
 
     display_name = trainer_entry.display_name
     trainer = trainer_entry.trainer
+    trainer_signature = inspect.signature(trainer)
+    if num_agents is not None and "num_agents" not in trainer_signature.parameters:
+        raise typer.BadParameter(f"{display_name} training does not support --num-agents.")
+    if (
+        num_agents is not None
+        and trainer_entry.fixed_num_agents is not None
+        and num_agents != trainer_entry.fixed_num_agents
+    ):
+        raise typer.BadParameter(
+            f"{display_name} requires exactly {trainer_entry.fixed_num_agents} agents."
+        )
     typer.echo(f"Starting {display_name} training")
     try:
         trainer_kwargs: dict[str, bool | int] = {}
-        trainer_signature = inspect.signature(trainer)
-        if wandb and "use_wandb" in inspect.signature(trainer).parameters:
+        if wandb and "use_wandb" in trainer_signature.parameters:
             trainer_kwargs["use_wandb"] = True
         if num_agents is not None and "num_agents" in trainer_signature.parameters:
             trainer_kwargs["num_agents"] = num_agents
+        if episodes is not None and "episodes" in trainer_signature.parameters:
+            trainer_kwargs["episodes"] = episodes
         trainer(**trainer_kwargs)
     finally:
         if replay_services is not None:
