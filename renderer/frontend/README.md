@@ -10,6 +10,7 @@ This app is the frontend for Simverse replay playback.
   - Fetches replay files from `/{game}/replays/` (`/snake/...`, `/maze/...`, or `/battle-grid/...`).
   - Uses a shared grid renderer with per-game adapters.
   - Polls for newly written replay JSON files during training.
+  - Accepts `?dir=...` as either a replay directory or a direct `replay.json` path.
 
 ## Run
 ```bash

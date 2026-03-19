@@ -8,9 +8,10 @@ type ReplayProps = {
   game: RenderGame
   onGameChange: (game: RenderGame) => void
   baseUrl: string
+  replayDir: string | null
 }
 
-function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
+function Replay({ game, onGameChange, baseUrl, replayDir }: ReplayProps) {
   const [selectedReplay, setSelectedReplay] = useState<ReplayDetail | null>(null)
   const [frameIndex, setFrameIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -22,6 +23,23 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
   const frames = Array.isArray(selectedReplay?.data?.frames) ? selectedReplay.data.frames : []
   const currentFrame: GenericFrame | null =
     frames.length > 0 ? frames[Math.max(0, Math.min(frameIndex, frames.length - 1))] : null
+
+  const buildReplayUrl = (dir: string | null) => {
+    const replayUrl = resolveUrl(baseUrl, '/replay/')
+    return dir ? `${replayUrl}?dir=${encodeURIComponent(dir)}` : replayUrl
+  }
+
+  const parentReplayDir = (dir: string | null) => {
+    if (!dir) {
+      return null
+    }
+    const normalized = dir.replace(/\\/g, '/')
+    const lastSlash = normalized.lastIndexOf('/')
+    if (lastSlash <= 0) {
+      return null
+    }
+    return normalized.slice(0, lastSlash)
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -38,13 +56,27 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
       setError('')
       setStatus('Loading replay...')
       try {
-        const response = await fetch(resolveUrl(baseUrl, '/replay/'), {
+        const response = await fetch(buildReplayUrl(replayDir), {
           cache: 'no-store',
         })
-        if (!response.ok) {
-          throw new Error(`Unable to load replay (${response.status})`)
+        let resolvedResponse = response
+        if (!resolvedResponse.ok && replayDir?.split(/[\\/]/).pop() === 'replay.json') {
+          const fallbackDir = parentReplayDir(replayDir)
+          if (fallbackDir) {
+            const fallbackResponse = await fetch(buildReplayUrl(fallbackDir), {
+              cache: 'no-store',
+            })
+            if (fallbackResponse.ok) {
+              resolvedResponse = fallbackResponse
+            } else {
+              throw new Error(`Unable to load replay (${fallbackResponse.status})`)
+            }
+          }
         }
-        const payload = (await response.json()) as ReplayDetail
+        if (!resolvedResponse.ok) {
+          throw new Error(`Unable to load replay (${resolvedResponse.status})`)
+        }
+        const payload = (await resolvedResponse.json()) as ReplayDetail
         if (!payload || typeof payload.name !== 'string' || typeof payload.id !== 'string') {
           throw new Error('Invalid replay response format')
         }
@@ -67,7 +99,7 @@ function Replay({ game, onGameChange, baseUrl }: ReplayProps) {
         setSelectedReplay(null)
       }
     })()
-  }, [baseUrl, refreshToken])
+  }, [baseUrl, refreshToken, replayDir])
 
   useEffect(() => {
     if (frameIndex >= frames.length) {

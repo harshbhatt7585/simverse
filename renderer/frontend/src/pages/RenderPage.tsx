@@ -13,6 +13,7 @@ function RenderPage() {
     }
     return 'snake'
   }, [searchParams])
+  const replayDir = searchParams.get('dir')
   const [game, setGame] = useState<RenderGame>(initialGame)
 
   useEffect(() => {
@@ -29,7 +30,7 @@ function RenderPage() {
 
   return (
     <main className="app-shell">
-      <Replay game={game} onGameChange={handleGameChange} baseUrl={`/${game}`} />
+      <Replay game={game} onGameChange={handleGameChange} baseUrl={`/${game}`} replayDir={replayDir} />
     </main>
   )
 }
