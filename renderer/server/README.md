@@ -24,3 +24,4 @@ Routers:
 
 Compatibility:
 - Use `server/main.py` as the single server entrypoint.
+- The `dir` query param may point to a replay directory or a direct `replay.json` file.

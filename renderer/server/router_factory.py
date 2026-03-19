@@ -26,20 +26,36 @@ def create_game_router(
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
 
-    def replay_dir(override_dir: str | None = None) -> Path:
+    def replay_source(override_dir: str | None = None) -> Path:
         configured = override_dir if override_dir else os.getenv(replay_env_var, default_replay_dir)
         candidate = Path(configured).expanduser()
         if candidate.is_absolute():
             return candidate
         return PROJECT_ROOT / candidate
 
+    def replay_dir(override_dir: str | None = None) -> Path:
+        candidate = replay_source(override_dir)
+        if candidate.is_file() and candidate.suffix.lower() == ".json":
+            return candidate.parent
+        return candidate
+
+    def replay_file(override_dir: str | None = None) -> Path | None:
+        candidate = replay_source(override_dir)
+        if candidate.is_file() and candidate.suffix.lower() == ".json":
+            return candidate
+        directory = candidate
+        single_replay_file = directory / "replay.json"
+        if single_replay_file.is_file():
+            return single_replay_file
+        return None
+
     def all_replay_files(override_dir: str | None = None) -> list[Path]:
+        single_replay_file = replay_file(override_dir)
+        if single_replay_file is not None:
+            return [single_replay_file]
         directory = replay_dir(override_dir)
         if not directory.exists():
             return []
-        single_replay_file = directory / "replay.json"
-        if single_replay_file.is_file():
-            return [single_replay_file]
         all_files = sorted(p for p in directory.rglob("*.json") if p.is_file())
         nested_files = [path for path in all_files if path.parent != directory]
         if not nested_files:
@@ -91,7 +107,14 @@ def create_game_router(
     def resolve_replay_path(
         replay_id: str, override_dir: str | None = None
     ) -> tuple[Path, Path] | None:
+        source = replay_source(override_dir).resolve()
         directory = replay_dir(override_dir).resolve()
+        if source.is_file() and source.suffix.lower() == ".json":
+            replay_name = replay_name_for_path(source, directory)
+            replay_id_candidate = replay_id_for_path(source, directory)
+            if replay_id in {replay_id_candidate, replay_name, source.stem}:
+                return source, directory
+            return None
         for name in (replay_id, f"{replay_id}.json"):
             candidate = (directory / name).resolve()
             if directory not in candidate.parents and candidate != directory:
